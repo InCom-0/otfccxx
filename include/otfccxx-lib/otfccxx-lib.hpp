@@ -2,16 +2,18 @@
 
 
 #include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <cstdlib>
 #include <expected>
-#include <nlohmann/json.hpp>
-#include <otfcc/font.h>
 #include <string>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
-#include <ranges>
-
+#include <nlohmann/json.hpp>
+#include <otfcc/font.h>
+#include <otfcc/sfnt.h>
 
 namespace otfccxx {
 enum class err : int {
@@ -19,99 +21,106 @@ enum class err : int {
     uknownError,
     jsonFontMissingCmapTable,
     jsonFontMissingGlyfTable,
+    jsonAdvanceWidthKeyNotFound,
     jsonFontCorrupted,
     someRequiredCodePointsNotPresent
 };
 
-class FontMerger;
 
 class Font {
-    friend FontMerger;
-
     using NLMjson = nlohmann::ordered_json;
 
 public:
+    Font(std::string_view const &jsonFont) : font_(NLMjson::parse(jsonFont)) {}
     Font(NLMjson &&jsonFont) : font_(std::move(jsonFont)) {}
 
+    // Glyph metric modification
+    static std::expected<bool, err> transform_glyphSize(NLMjson &out_glyph, double const a, double const b,
+                                                        double const c, double const d, double const dx,
+                                                        double const dy) {
 
-    // Filtering
-    std::expected<std::vector<int>, err> filter_glyphs_inPlace(std::vector<int> const &charCodes_toKeep) {
+        auto aw_iter = out_glyph.find("advanceWidth");
+        if (aw_iter == out_glyph.end()) { return std::unexpected(err::jsonAdvanceWidthKeyNotFound); }
 
-        // Instead of deleting we will insert into a 'cleaned' copy only those charCodes that we want/need
-        NLMjson res = font_;
+        (*aw_iter) = static_cast<int>(round(a * static_cast<double>(out_glyph.at("advanceWidth"))));
 
-        auto cmapIT = res.find("cmap");
-        if (cmapIT == res.end()) { return std::unexpected(err::jsonFontMissingCmapTable); }
-        auto &cmp = (*cmapIT);
-        cmp.clear();
-
-        auto glyfIT = res.find("glyf");
-        if (glyfIT == res.end()) { return std::unexpected(err::jsonFontMissingGlyfTable); }
-        auto &glf = (*glyfIT);
-        glf.clear();
-
-        // Those CCs not found in the original font be kept here and returned
-        std::vector<int> toKeep_butMissing;
-
-        auto &orig_cmp = *(font_.find("cmap"));
-        auto &orig_glf = *(font_.find("glyf"));
-
-        std::unordered_set<std::string> alreadyAdded;
-        for (auto const one_toKeep : charCodes_toKeep) {
-            auto item_it = orig_cmp.find(std::to_string(one_toKeep));
-
-            std::vector<std::pair<std::string, std::string>>        toAddCmp;
-            std::vector<std::pair<std::string, decltype(*item_it)>> toAddGlyf;
-            std::unordered_set<std::string>                         alreadyExplored;
-
-            auto adder = [&](this auto &self, decltype(item_it) const &orig_cmp_iter) -> bool {
-                // It must not have been added before
-                // It must not have been already explored (protects against cyclic dependendencies)
-                if (not alreadyAdded.contains(orig_cmp_iter.key()) &&
-                    alreadyExplored.insert(orig_cmp_iter.key()).second) {
-
-                    auto orig_glf_iter = orig_glf.find(*orig_cmp_iter);
-                    // There must be a glyf associated
-                    if (orig_glf_iter != orig_glf.end()) {
-                        if (auto ref_iter = orig_glf_iter->find("references"); ref_iter != orig_glf_iter->end()) {
-                            // If the glyf contains some references to other glyfs
-                            for (auto &[_, val] : ref_iter->items()) {
-                                if (auto refName_iter = val.find("glyph"); refName_iter != val.end()) {
-                                    // Find whether a referenced glyf exists in CMap
-                                    auto cmpToRef_iter =
-                                        std::find_if(orig_cmp.begin(), orig_cmp.end(),
-                                                     [&](auto const &elem) { return elem == (*refName_iter); });
-                                    // If the referenced glyf is not found in the Cmap then false all the way up
-                                    if (cmpToRef_iter == orig_cmp.end()) { return false; }
-                                    // If the recursion returns false then also return false
-                                    if (not self(cmpToRef_iter)) { return false; }
-                                }
-                            }
-                        }
-                        toAddCmp.push_back({orig_cmp_iter.key(), *orig_cmp_iter});
-                        toAddGlyf.push_back({orig_glf_iter.key(), *orig_glf_iter});
-                        alreadyAdded.insert(orig_cmp_iter.key());
-                    }
-                    else { return false; }
-                }
-                return true;
-            };
-
-            if (item_it != orig_cmp.end() && adder(item_it)) {
-                for (auto rIter = toAddCmp.rbegin(); rIter != toAddCmp.rend(); ++rIter) {
-                    cmp.push_back({rIter->first, rIter->second});
-                }
-                for (auto rIter = toAddGlyf.rbegin(); rIter != toAddGlyf.rend(); ++rIter) {
-                    glf.push_back({rIter->first, rIter->second});
-                }
-            }
-            else { toKeep_butMissing.push_back(one_toKeep); }
+        if (auto ah_iter = out_glyph.find("advanceHeight"); ah_iter != out_glyph.end()) {
+            (*ah_iter) = static_cast<int>(round(d * static_cast<double>(*ah_iter)));
+        }
+        if (auto vo_iter = out_glyph.find("verticalOrigin"); vo_iter != out_glyph.end()) {
+            (*vo_iter) = static_cast<int>(round(d * static_cast<double>(*vo_iter)));
         }
 
-        // Replace with a filtered copy
-        font_ = res;
-        return toKeep_butMissing;
+        if (out_glyph.find("contours") != out_glyph.end()) {
+            for (auto &contour : out_glyph["contours"]) {
+                for (auto &point : contour) {
+                    double const x = point.at("x");
+                    double const y = point.at("y");
+                    point["x"]     = static_cast<int>(a * x + b * y + dx);
+                    point["y"]     = static_cast<int>(c * x + d * y + dy);
+                }
+            }
+        }
+        if (out_glyph.find("references") != out_glyph.end()) {
+            for (auto &reference : out_glyph["references"]) {
+                double const x = reference.at("x");
+                double const y = reference.at("y");
+                reference["x"] = static_cast<int>(a * x + b * y + dx);
+                reference["y"] = static_cast<int>(c * x + d * y + dy);
+            }
+        }
+        return true;
     }
+
+    static std::expected<bool, err> transform_glyphByAW(NLMjson &out_glyph, double const newWidth) {
+
+        auto aw_iter = out_glyph.find("advanceWidth");
+        if (aw_iter == out_glyph.end()) { return std::unexpected(err::jsonAdvanceWidthKeyNotFound); }
+
+        // If the difference is small enough, we don't transform
+        double const curAdvW = static_cast<double>(*aw_iter);
+        if (std::abs(newWidth - curAdvW) < 0.5) { return false; }
+        int const moveBy = std::round((newWidth - curAdvW) / 2);
+
+        auto contours_iter = out_glyph.find("contours");
+
+        if (contours_iter != out_glyph.end()) {
+            for (auto &[_, contGrp] : contours_iter->items()) {
+                for (auto &[__, contPoint] : contGrp.items()) {
+                    // Move each contour point on X axis
+                    contPoint.at("x") = static_cast<int>(contPoint.at("x")) + moveBy;
+                }
+            }
+        }
+
+        auto references_iter = out_glyph.find("references");
+        if (references_iter != out_glyph.end()) {
+            for (auto &[_, oneRef] : references_iter->items()) {
+                oneRef.at("x") = static_cast<int>(oneRef.at("x")) + moveBy;
+            }
+        }
+
+        (*aw_iter) = static_cast<int>(std::round(newWidth));
+        return true;
+    }
+
+    // func must accept NLMjson & as a first (out)parameter for its call operator
+    // Returns number of non-transformed glyphs
+    std::expected<size_t, err> transform_allGlyphs(auto &&func) {
+        auto glyf_table = font_.find("glyf");
+        if (glyf_table == font_.end()) { return std::unexpected(err::jsonFontMissingGlyfTable); }
+
+        size_t res = 0;
+        for (auto &[name, oneGlyf] : glyf_table->items()) {
+            if (auto curRes = func(oneGlyf); curRes.has_value()) { res += (not curRes.value()); }
+            else { return std::unexpected(curRes.error()); }
+        }
+        return res;
+    }
+
+
+    // Erase methods
+    std::expected<bool, err> erase_glyphOrder() { return true; }
 
 
 private:
