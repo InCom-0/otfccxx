@@ -1,9 +1,10 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 
-#include <optional>
 #include <span>
 
 
@@ -53,14 +54,25 @@ using hb_blob_uptr         = std::unique_ptr<hb_blob_t, detail::_hb_blob_uptr_de
 using hb_set_uptr          = std::unique_ptr<hb_set_t, detail::_hb_set_uptr_deleter>;
 using hb_subset_input_uptr = std::unique_ptr<hb_subset_input_t, detail::_hb_subset_input_uptr_deleter>;
 
+using font_raw = std::vector<std::byte>;
+
 
 std::expected<bool, std::filesystem::file_type> write_bytesToFile(std::filesystem::path const &p,
                                                                   std::span<const std::byte>   bytes);
 
 class Subsetter {
+private:
+    class Impl;
 
 public:
-    Subsetter() : toKeep_unicodeCPs(hb_set_create()) {}
+    Subsetter();                                 // defined in the implementation file
+
+    Subsetter(int);                              // defined in the implementation file
+    ~Subsetter();                                // defined in the implementation file, where impl is a complete type
+    Subsetter(Subsetter &&) noexcept;            // defined in the implementation file
+    Subsetter(const Subsetter &) = delete;
+    Subsetter &operator=(Subsetter &&) noexcept; // defined in the implementation file
+    Subsetter &operator=(const Subsetter &) = delete;
 
 
     Subsetter &add_ff_toSubset(std::span<const char> buf, unsigned int const faceIndex = 0u);
@@ -71,42 +83,25 @@ public:
     Subsetter &add_ff_categoryBackup(std::filesystem::path const &pth, unsigned int const faceIndex = 0u);
     Subsetter &add_ff_lastResort(std::filesystem::path const &pth, unsigned int const faceIndex = 0u);
 
-    Subsetter &add_ff_toSubset(hb_face_t *ptr, unsigned int const faceIndex = 0u);
-    Subsetter &add_ff_categoryBackup(hb_face_t *ptr, unsigned int const faceIndex = 0u);
-    Subsetter &add_ff_lastResort(hb_face_t *ptr, unsigned int const faceIndex = 0u);
+    // Subsetter &add_ff_toSubset(hb_face_t *ptr, unsigned int const faceIndex = 0u);
+    // Subsetter &add_ff_categoryBackup(hb_face_t *ptr, unsigned int const faceIndex = 0u);
+    // Subsetter &add_ff_lastResort(hb_face_t *ptr, unsigned int const faceIndex = 0u);
 
-    Subsetter &add_toKeep_CP(hb_codepoint_t cp);
-    Subsetter &add_toKeep_CPs(std::span<const hb_codepoint_t> cps);
+    Subsetter &add_toKeep_CP(uint32_t cp);
+    Subsetter &add_toKeep_CPs(std::span<const uint32_t> cps);
 
     // 1) execute() - Get 'waterfall of font faces'
     // 2) execute_bestEffort() - Get 'waterfall of font faces' + set a unicode points that weren't found in any font
-    std::expected<std::vector<hb_face_uptr>, err>                         execute();
-    std::expected<std::pair<std::vector<hb_face_uptr>, hb_set_uptr>, err> execute_bestEffort();
+    std::expected<std::vector<font_raw>, err>                         execute();
+    std::expected<std::pair<std::vector<font_raw>, std::vector<uint32_t>>, err> execute_bestEffort();
 
 
-    bool is_inError() { return inError.has_value(); }
-    err  get_error() { return inError.value(); }
+    bool is_inError();
+    err  get_error();
 
 
 private:
-    std::expected<hb_face_uptr, err> make_ff(std::span<const char> const &buf, unsigned int const faceIndex);
-
-    std::expected<hb_face_uptr, err> make_subset(hb_face_t *ff);
-    std::expected<bool, err>         should_include_category(hb_face_t *ff);
-
-    hb_set_uptr toKeep_unicodeCPs;
-
-    // 1) ffs_toSubset - Main font(s) to subset
-    // 2) ffs_categoryBackup - Fonts that may be included as a whole (the intended usecase is for already minified fonts
-    // include eg. one unicode character category only)
-    // 3) ffs_lastResort - If after going through the above we still have some unicodeCPs to keep (because they are NOT
-    // in either of the above) ... font faces with large unicode CP coverage are good here (ie. Iosevka)
-    std::vector<hb_face_uptr> ffs_toSubset;
-    std::vector<hb_face_uptr> ffs_categoryBackup;
-    std::vector<hb_face_uptr> ffs_lastResort;
-
-
-    std::optional<err> inError = std::nullopt;
+    std::unique_ptr<Impl> pimpl;
 };
 
 

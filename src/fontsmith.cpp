@@ -1,8 +1,10 @@
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <fstream>
 
 #include <otfccxx-lib/fontsmith.hpp>
+#include <ranges>
 #include <system_error>
 #include <utility>
 
@@ -12,6 +14,8 @@ struct AccessInfo {
     bool readable;
     bool writable;
 };
+
+
 inline std::expected<AccessInfo, std::filesystem::file_type> check_access(const std::filesystem::path &p) {
     namespace fs = std::filesystem;
     std::error_code ec;
@@ -72,94 +76,192 @@ std::expected<bool, std::filesystem::file_type> write_bytesToFile(std::filesyste
     return outs.good();
 }
 
+class Subsetter::Impl {
+    friend class Subsetter;
+
+public:
+private:
+    void add_ff_toSubset(std::span<const char> &buf, unsigned int const faceIndex) {
+        if (auto toInsert = make_ff(buf, faceIndex); toInsert.has_value()) {
+            ffs_toSubset.push_back(std::move(toInsert.value()));
+        }
+    }
+    void add_ff_categoryBackup(std::span<const char> &buf, unsigned int const faceIndex) {
+        if (auto toInsert = make_ff(buf, faceIndex); toInsert.has_value()) {
+            ffs_categoryBackup.push_back(std::move(toInsert.value()));
+        }
+    }
+    void add_ff_lastResort(std::span<const char> &buf, unsigned int const faceIndex) {
+        if (auto toInsert = make_ff(buf, faceIndex); toInsert.has_value()) {
+            ffs_lastResort.push_back(std::move(toInsert.value()));
+        }
+    }
+
+
+    void add_ff_toSubset(std::filesystem::path const &pth, unsigned int const faceIndex) {
+        if (auto exp_access = check_access(pth); exp_access.has_value()) {
+            if (exp_access->readable) {
+                std::ifstream file(pth, std::ios::binary);
+                if (! file) { goto RET; }
+
+                std::vector<char> const data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+                if (data.empty()) { goto RET; }
+
+                if (auto toInsert = make_ff(data, faceIndex); toInsert.has_value()) {
+                    ffs_toSubset.push_back(std::move(toInsert.value()));
+                }
+            }
+        }
+    RET:
+    }
+    void add_ff_categoryBackup(std::filesystem::path const &pth, unsigned int const faceIndex) {
+        if (auto exp_access = check_access(pth); exp_access.has_value()) {
+            if (exp_access->readable) {
+                std::ifstream file(pth, std::ios::binary);
+                if (! file) { goto RET; }
+
+                std::vector<char> const data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+                if (data.empty()) { goto RET; }
+
+                if (auto toInsert = make_ff(data, faceIndex); toInsert.has_value()) {
+                    ffs_categoryBackup.push_back(std::move(toInsert.value()));
+                }
+            }
+        }
+    RET:
+    }
+    void add_ff_lastResort(std::filesystem::path const &pth, unsigned int const faceIndex) {
+        if (auto exp_access = check_access(pth); exp_access.has_value()) {
+            if (exp_access->readable) {
+                std::ifstream file(pth, std::ios::binary);
+                if (! file) { goto RET; }
+
+                std::vector<char> const data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+                if (data.empty()) { goto RET; }
+
+                if (auto toInsert = make_ff(data, faceIndex); toInsert.has_value()) {
+                    ffs_lastResort.push_back(std::move(toInsert.value()));
+                }
+            }
+        }
+    RET:
+    }
+
+
+    std::expected<hb_face_uptr, err> make_ff(std::span<const char> const &buf, unsigned int const faceIndex) {
+        hb_blob_uptr blob(
+            hb_blob_create_or_fail(buf.data(), buf.size_bytes(), HB_MEMORY_MODE_DUPLICATE, nullptr, nullptr));
+        if (! blob) { return std::unexpected(err::hb_blob_t_createFailure); }
+
+        // Create face from blob
+        hb_face_uptr face(hb_face_create_or_fail(blob.get(), faceIndex));
+        if (! face) { return std::unexpected(err::hb_face_t_createFailure); }
+
+        return face;
+    }
+
+
+    std::expected<hb_face_uptr, err> make_subset(hb_face_t *ff) {
+        hb_set_uptr unicodes_toKeep_in_ff(hb_set_create());
+        hb_face_collect_unicodes(ff, unicodes_toKeep_in_ff.get());
+
+        hb_set_intersect(unicodes_toKeep_in_ff.get(), toKeep_unicodeCPs.get());
+        if (hb_set_is_empty(unicodes_toKeep_in_ff.get())) {
+            return std::unexpected(err::make_subset_noIntersectingGlyphs);
+        }
+
+        // Set the unicodes to keep in the subsetted font
+        hb_subset_input_uptr si(hb_subset_input_create_or_fail());
+        if (! si) { return std::unexpected(err::subsetInput_failedToCreate); }
+
+        hb_set_t *si_inputUCCPs = hb_subset_input_unicode_set(si.get());
+        hb_set_set(si_inputUCCPs, unicodes_toKeep_in_ff.get());
+
+        // Set subsetting flags
+        hb_subset_input_set_flags(si.get(), HB_SUBSET_FLAGS_DEFAULT);
+
+        // Execute subsetting
+        hb_face_uptr res(hb_subset_or_fail(ff, si.get()));
+        if (! res) { return std::unexpected(err::hb_subset_executeFailure); }
+
+        // Only keep the remaining unicodeCPs by 'filtering' the ones we use from 'ff'
+        hb_set_symmetric_difference(toKeep_unicodeCPs.get(), unicodes_toKeep_in_ff.get());
+        return res;
+    }
+    std::expected<bool, err> should_include_category(hb_face_t *ff) {
+        hb_set_uptr unicodes_toKeep_in_ff(hb_set_create());
+        hb_face_collect_unicodes(ff, unicodes_toKeep_in_ff.get());
+
+        hb_set_intersect(unicodes_toKeep_in_ff.get(), toKeep_unicodeCPs.get());
+
+        bool res = not hb_set_is_empty(unicodes_toKeep_in_ff.get());
+
+        // Only keep the remaining unicodeCPs by 'filtering' the ones we use from 'ff'
+        hb_set_symmetric_difference(toKeep_unicodeCPs.get(), unicodes_toKeep_in_ff.get());
+        return res;
+    }
+
+    hb_set_uptr toKeep_unicodeCPs;
+
+    // 1) ffs_toSubset - Main font(s) to subset
+    // 2) ffs_categoryBackup - Fonts that may be included as a whole (the intended usecase is for already minified fonts
+    // include eg. one unicode character category only)
+    // 3) ffs_lastResort - If after going through the above we still have some unicodeCPs to keep (because they are NOT
+    // in either of the above) ... font faces with large unicode CP coverage are good here (ie. Iosevka)
+    std::vector<hb_face_uptr> ffs_toSubset;
+    std::vector<hb_face_uptr> ffs_categoryBackup;
+    std::vector<hb_face_uptr> ffs_lastResort;
+
+
+    std::optional<err> inError = std::nullopt;
+};
+
+Subsetter::Subsetter() : pimpl(std::make_unique<Impl>()) {};
+
 
 // Adding FontFaces
 Subsetter &Subsetter::add_ff_toSubset(std::span<const char> buf, unsigned int const faceIndex) {
-    if (auto toInsert = make_ff(buf, faceIndex); toInsert.has_value()) {
-        ffs_toSubset.push_back(std::move(toInsert.value()));
-    }
+    pimpl->add_ff_toSubset(buf, faceIndex);
     return *this;
 }
 Subsetter &Subsetter::add_ff_categoryBackup(std::span<const char> buf, unsigned int const faceIndex) {
-    if (auto toInsert = make_ff(buf, faceIndex); toInsert.has_value()) {
-        ffs_categoryBackup.push_back(std::move(toInsert.value()));
-    }
+    pimpl->add_ff_categoryBackup(buf, faceIndex);
     return *this;
 }
 Subsetter &Subsetter::add_ff_lastResort(std::span<const char> buf, unsigned int const faceIndex) {
-    if (auto toInsert = make_ff(buf, faceIndex); toInsert.has_value()) {
-        ffs_lastResort.push_back(std::move(toInsert.value()));
-    }
+    pimpl->add_ff_lastResort(buf, faceIndex);
     return *this;
 }
 
 
 Subsetter &Subsetter::add_ff_toSubset(std::filesystem::path const &pth, unsigned int const faceIndex) {
-
-    if (auto exp_access = check_access(pth); exp_access.has_value()) {
-        if (exp_access->readable) {
-            std::ifstream file(pth, std::ios::binary);
-            if (! file) { goto RET; }
-
-            std::vector<char> const data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-            if (data.empty()) { goto RET; }
-
-            if (auto toInsert = make_ff(data, faceIndex); toInsert.has_value()) {
-                ffs_toSubset.push_back(std::move(toInsert.value()));
-            }
-        }
-    }
-RET:
+    pimpl->add_ff_toSubset(pth, faceIndex);
     return *this;
 }
 Subsetter &Subsetter::add_ff_categoryBackup(std::filesystem::path const &pth, unsigned int const faceIndex) {
-    if (auto exp_access = check_access(pth); exp_access.has_value()) {
-        if (exp_access->readable) {
-            std::ifstream file(pth, std::ios::binary);
-            if (! file) { goto RET; }
-
-            std::vector<char> const data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-            if (data.empty()) { goto RET; }
-
-            if (auto toInsert = make_ff(data, faceIndex); toInsert.has_value()) {
-                ffs_categoryBackup.push_back(std::move(toInsert.value()));
-            }
-        }
-    }
-RET:
+    pimpl->add_ff_categoryBackup(pth, faceIndex);
     return *this;
 }
 Subsetter &Subsetter::add_ff_lastResort(std::filesystem::path const &pth, unsigned int const faceIndex) {
-    if (auto exp_access = check_access(pth); exp_access.has_value()) {
-        if (exp_access->readable) {
-            std::ifstream file(pth, std::ios::binary);
-            if (! file) { goto RET; }
-
-            std::vector<char> const data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-            if (data.empty()) { goto RET; }
-
-            if (auto toInsert = make_ff(data, faceIndex); toInsert.has_value()) {
-                ffs_lastResort.push_back(std::move(toInsert.value()));
-            }
-        }
-    }
-RET:
+    pimpl->add_ff_lastResort(pth, faceIndex);
     return *this;
 }
 
 
-Subsetter &Subsetter::add_ff_toSubset(hb_face_t *ptr, unsigned int const faceIndex) {
-    if (ptr) { ffs_toSubset.push_back(hb_face_uptr(ptr)); }
-    return *this;
-}
-Subsetter &Subsetter::add_ff_categoryBackup(hb_face_t *ptr, unsigned int const faceIndex) {
-    if (ptr) { ffs_categoryBackup.push_back(hb_face_uptr(ptr)); }
-    return *this;
-}
-Subsetter &Subsetter::add_ff_lastResort(hb_face_t *ptr, unsigned int const faceIndex) {
-    if (ptr) { ffs_lastResort.push_back(hb_face_uptr(ptr)); }
-    return *this;
-}
+// Subsetter &Subsetter::add_ff_toSubset(hb_face_t *ptr, unsigned int const faceIndex) {
+//     if (ptr) { ffs_toSubset.push_back(hb_face_uptr(ptr)); }
+//     return *this;
+// }
+
+// Subsetter &Subsetter::add_ff_categoryBackup(hb_face_t *ptr, unsigned int const faceIndex) {
+//     if (ptr) { ffs_categoryBackup.push_back(hb_face_uptr(ptr)); }
+//     return *this;
+// }
+
+// Subsetter &Subsetter::add_ff_lastResort(hb_face_t *ptr, unsigned int const faceIndex) {
+//     if (ptr) { ffs_lastResort.push_back(hb_face_uptr(ptr)); }
+//     return *this;
+// }
 
 
 // Adding unicode character points and/or glyph IDs
@@ -176,22 +278,22 @@ Subsetter &Subsetter::add_toKeep_CPs(std::span<const hb_codepoint_t> const cps) 
 
 
 // Execution
-std::expected<std::vector<hb_face_uptr>, err> Subsetter::execute() {
+std::expected<std::vector<font_raw>, err> Subsetter::execute() {
     if (auto res = execute_bestEffort(); res.has_value()) {
-        if (hb_set_is_empty(res.value().second.get())) { return std::move(res.value().first); }
+        if (res.value().second.empty()) { return std::move(res.value().first); }
         else { return std::unexpected(err::execute_someRequestedGlyphsAreMissing); }
     }
     else { return std::unexpected(res.error()); }
 }
 
 
-std::expected<std::pair<std::vector<hb_face_uptr>, hb_set_uptr>, err> Subsetter::execute_bestEffort() {
+std::expected<std::pair<std::vector<font_raw>, std::vector<uint32_t>>, err> Subsetter::execute_bestEffort() {
     std::vector<hb_face_uptr> res;
 
-    for (auto &ff_to : ffs_toSubset) {
-        if (hb_set_is_empty(toKeep_unicodeCPs.get())) { goto RET; }
+    for (auto &ff_to : pimpl->ffs_toSubset) {
+        if (hb_set_is_empty(pimpl->toKeep_unicodeCPs.get())) { goto RET; }
 
-        auto exp_ff = make_subset(ff_to.get());
+        auto exp_ff = pimpl->make_subset(ff_to.get());
         if (not exp_ff.has_value()) {
             if (exp_ff.error() == err::make_subset_noIntersectingGlyphs) { continue; }
             else { return std::unexpected(exp_ff.error()); }
@@ -199,10 +301,10 @@ std::expected<std::pair<std::vector<hb_face_uptr>, hb_set_uptr>, err> Subsetter:
         else { res.push_back(std::move(exp_ff.value())); }
     }
 
-    for (auto &ff_to : ffs_categoryBackup) {
-        if (hb_set_is_empty(toKeep_unicodeCPs.get())) { goto RET; }
+    for (auto &ff_to : pimpl->ffs_categoryBackup) {
+        if (hb_set_is_empty(pimpl->toKeep_unicodeCPs.get())) { goto RET; }
 
-        auto exp_ff = should_include_category(ff_to.get());
+        auto exp_ff = pimpl->should_include_category(ff_to.get());
         if (not exp_ff.has_value()) {
             if (exp_ff.error() == err::make_subset_noIntersectingGlyphs) { continue; }
             else { return std::unexpected(exp_ff.error()); }
@@ -210,10 +312,10 @@ std::expected<std::pair<std::vector<hb_face_uptr>, hb_set_uptr>, err> Subsetter:
         else { res.push_back(hb_face_uptr(hb_face_reference(ff_to.get()))); }
     }
 
-    for (auto &ff_to : ffs_lastResort) {
-        if (hb_set_is_empty(toKeep_unicodeCPs.get())) { goto RET; }
+    for (auto &ff_to : pimpl->ffs_lastResort) {
+        if (hb_set_is_empty(pimpl->toKeep_unicodeCPs.get())) { goto RET; }
 
-        auto exp_ff = make_subset(ff_to.get());
+        auto exp_ff = pimpl->make_subset(ff_to.get());
         if (not exp_ff.has_value()) {
             if (exp_ff.error() == err::make_subset_noIntersectingGlyphs) { continue; }
             else { return std::unexpected(exp_ff.error()); }
@@ -223,61 +325,23 @@ std::expected<std::pair<std::vector<hb_face_uptr>, hb_set_uptr>, err> Subsetter:
 
 
 RET:
-    return std::make_pair(std::move(res), hb_set_uptr(hb_set_copy(toKeep_unicodeCPs.get())));
+    std::vector<uint32_t> resVec;
+    for (auto const &item : *pimpl->toKeep_unicodeCPs.get()) { resVec.push_back(item); }
+
+    // return std::make_pair(std::move(res), hb_set_uptr(hb_set_copy(toKeep_unicodeCPs.get())));
+    return std::make_pair(std::vector<font_raw>{}, std::move(resVec));
+}
+
+
+bool Subsetter::is_inError() {
+    return pimpl->inError.has_value();
+}
+err Subsetter::get_error() {
+    return pimpl->inError.value();
 }
 
 
 // PRIVATE METHODS
-std::expected<hb_face_uptr, err> Subsetter::make_ff(std::span<const char> const &buf, unsigned int const faceIndex) {
-    hb_blob_uptr blob(hb_blob_create_or_fail(buf.data(), buf.size_bytes(), HB_MEMORY_MODE_DUPLICATE, nullptr, nullptr));
-    if (! blob) { return std::unexpected(err::hb_blob_t_createFailure); }
-
-    // Create face from blob
-    hb_face_uptr face(hb_face_create_or_fail(blob.get(), faceIndex));
-    if (! face) { return std::unexpected(err::hb_face_t_createFailure); }
-
-    return face;
-}
-
-
-std::expected<hb_face_uptr, err> Subsetter::make_subset(hb_face_t *ff) {
-    hb_set_uptr unicodes_toKeep_in_ff(hb_set_create());
-    hb_face_collect_unicodes(ff, unicodes_toKeep_in_ff.get());
-
-    hb_set_intersect(unicodes_toKeep_in_ff.get(), toKeep_unicodeCPs.get());
-    if (hb_set_is_empty(unicodes_toKeep_in_ff.get())) { return std::unexpected(err::make_subset_noIntersectingGlyphs); }
-
-    // Set the unicodes to keep in the subsetted font
-    hb_subset_input_uptr si(hb_subset_input_create_or_fail());
-    if (! si) { return std::unexpected(err::subsetInput_failedToCreate); }
-
-    hb_set_t *si_inputUCCPs = hb_subset_input_unicode_set(si.get());
-    hb_set_set(si_inputUCCPs, unicodes_toKeep_in_ff.get());
-
-    // Set subsetting flags
-    hb_subset_input_set_flags(si.get(), HB_SUBSET_FLAGS_DEFAULT);
-
-    // Execute subsetting
-    hb_face_uptr res(hb_subset_or_fail(ff, si.get()));
-    if (! res) { return std::unexpected(err::hb_subset_executeFailure); }
-
-    // Only keep the remaining unicodeCPs by 'filtering' the ones we use from 'ff'
-    hb_set_symmetric_difference(toKeep_unicodeCPs.get(), unicodes_toKeep_in_ff.get());
-    return res;
-}
-
-std::expected<bool, err> Subsetter::should_include_category(hb_face_t *ff) {
-    hb_set_uptr unicodes_toKeep_in_ff(hb_set_create());
-    hb_face_collect_unicodes(ff, unicodes_toKeep_in_ff.get());
-
-    hb_set_intersect(unicodes_toKeep_in_ff.get(), toKeep_unicodeCPs.get());
-
-    bool res = not hb_set_is_empty(unicodes_toKeep_in_ff.get());
-
-    // Only keep the remaining unicodeCPs by 'filtering' the ones we use from 'ff'
-    hb_set_symmetric_difference(toKeep_unicodeCPs.get(), unicodes_toKeep_in_ff.get());
-    return res;
-}
 
 
 } // namespace fontsmith
