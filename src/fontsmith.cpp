@@ -1,15 +1,44 @@
-#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <fstream>
-
-#include <otfccxx-lib/fontsmith.hpp>
-#include <ranges>
+#include <memory>
+#include <span>
 #include <system_error>
 #include <utility>
 
+#include <nlohmann/json.hpp>
+#include <otfccxx-lib/fontsmith.hpp>
+
 
 namespace fontsmith {
+namespace detail {
+struct _hb_face_uptr_deleter {
+    void operator()(hb_face_t *f) const noexcept {
+        if (f) { hb_face_destroy(f); }
+    }
+};
+struct _hb_blob_uptr_deleter {
+    void operator()(hb_blob_t *b) const noexcept {
+        if (b) { hb_blob_destroy(b); }
+    }
+};
+struct _hb_set_uptr_deleter {
+    void operator()(hb_set_t *s) const noexcept {
+        if (s) { hb_set_destroy(s); }
+    }
+};
+struct _hb_subset_input_uptr_deleter {
+    void operator()(hb_subset_input_t *s) const noexcept {
+        if (s) { hb_subset_input_destroy(s); }
+    }
+};
+} // namespace detail
+
+using hb_face_uptr         = std::unique_ptr<hb_face_t, detail::_hb_face_uptr_deleter>;
+using hb_blob_uptr         = std::unique_ptr<hb_blob_t, detail::_hb_blob_uptr_deleter>;
+using hb_set_uptr          = std::unique_ptr<hb_set_t, detail::_hb_set_uptr_deleter>;
+using hb_subset_input_uptr = std::unique_ptr<hb_subset_input_t, detail::_hb_subset_input_uptr_deleter>;
+
 struct AccessInfo {
     bool readable;
     bool writable;
@@ -80,6 +109,8 @@ class Subsetter::Impl {
     friend class Subsetter;
 
 public:
+    Impl() : toKeep_unicodeCPs(hb_set_create()) {}
+
 private:
     void add_ff_toSubset(std::span<const char> &buf, unsigned int const faceIndex) {
         if (auto toInsert = make_ff(buf, faceIndex); toInsert.has_value()) {
@@ -217,6 +248,9 @@ private:
 };
 
 Subsetter::Subsetter() : pimpl(std::make_unique<Impl>()) {};
+Subsetter::~Subsetter()                                = default;
+Subsetter::Subsetter(Subsetter &&) noexcept            = default;
+Subsetter &Subsetter::operator=(Subsetter &&) noexcept = default;
 
 
 // Adding FontFaces
@@ -267,12 +301,12 @@ Subsetter &Subsetter::add_ff_lastResort(std::filesystem::path const &pth, unsign
 // Adding unicode character points and/or glyph IDs
 
 Subsetter &Subsetter::add_toKeep_CP(hb_codepoint_t const cp) {
-    hb_set_add(toKeep_unicodeCPs.get(), cp);
+    hb_set_add(pimpl->toKeep_unicodeCPs.get(), cp);
     return *this;
 }
 
 Subsetter &Subsetter::add_toKeep_CPs(std::span<const hb_codepoint_t> const cps) {
-    for (auto const &cp : cps) { hb_set_add(toKeep_unicodeCPs.get(), cp); }
+    for (auto const &cp : cps) { hb_set_add(pimpl->toKeep_unicodeCPs.get(), cp); }
     return *this;
 }
 
@@ -288,7 +322,7 @@ std::expected<std::vector<font_raw>, err> Subsetter::execute() {
 
 
 std::expected<std::pair<std::vector<font_raw>, std::vector<uint32_t>>, err> Subsetter::execute_bestEffort() {
-    std::vector<hb_face_uptr> res;
+    std::vector<hb_blob_uptr> res;
 
     for (auto &ff_to : pimpl->ffs_toSubset) {
         if (hb_set_is_empty(pimpl->toKeep_unicodeCPs.get())) { goto RET; }
@@ -298,7 +332,7 @@ std::expected<std::pair<std::vector<font_raw>, std::vector<uint32_t>>, err> Subs
             if (exp_ff.error() == err::make_subset_noIntersectingGlyphs) { continue; }
             else { return std::unexpected(exp_ff.error()); }
         }
-        else { res.push_back(std::move(exp_ff.value())); }
+        else { res.push_back(hb_blob_uptr(hb_face_reference_blob(exp_ff.value().get()))); }
     }
 
     for (auto &ff_to : pimpl->ffs_categoryBackup) {
@@ -309,7 +343,7 @@ std::expected<std::pair<std::vector<font_raw>, std::vector<uint32_t>>, err> Subs
             if (exp_ff.error() == err::make_subset_noIntersectingGlyphs) { continue; }
             else { return std::unexpected(exp_ff.error()); }
         }
-        else { res.push_back(hb_face_uptr(hb_face_reference(ff_to.get()))); }
+        else { res.push_back(hb_blob_uptr(hb_face_reference_blob(ff_to.get()))); }
     }
 
     for (auto &ff_to : pimpl->ffs_lastResort) {
@@ -320,7 +354,7 @@ std::expected<std::pair<std::vector<font_raw>, std::vector<uint32_t>>, err> Subs
             if (exp_ff.error() == err::make_subset_noIntersectingGlyphs) { continue; }
             else { return std::unexpected(exp_ff.error()); }
         }
-        else { res.push_back(std::move(exp_ff.value())); }
+        else { res.push_back(hb_blob_uptr(hb_face_reference_blob(exp_ff.value().get()))); }
     }
 
 
@@ -328,8 +362,15 @@ RET:
     std::vector<uint32_t> resVec;
     for (auto const &item : *pimpl->toKeep_unicodeCPs.get()) { resVec.push_back(item); }
 
-    // return std::make_pair(std::move(res), hb_set_uptr(hb_set_copy(toKeep_unicodeCPs.get())));
-    return std::make_pair(std::vector<font_raw>{}, std::move(resVec));
+    return std::make_pair(
+        std::vector<font_raw>(std::from_range, res | std::views::transform([](auto const &item) {
+                                                   unsigned int length;
+                                                   const char  *data = hb_blob_get_data(item.get(), &length);
+                                                   return font_raw(
+                                                       std::from_range,
+                                                       std::span(reinterpret_cast<const std::byte *>(data), length));
+                                               })),
+        std::move(resVec));
 }
 
 
@@ -340,8 +381,18 @@ err Subsetter::get_error() {
     return pimpl->inError.value();
 }
 
+class Modifier::Impl {
+    friend class Modifier;
+
+public:
+private:
+    nlohmann::ordered_json _jsonFont;
+};
+
+
+Modifier::Modifier() : pimpl(std::make_unique<Impl>()) {}
+
 
 // PRIVATE METHODS
-
 
 } // namespace fontsmith
