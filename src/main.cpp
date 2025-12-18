@@ -3,13 +3,12 @@
 #include <fstream>
 #include <iostream>
 
-#include <otfccxx-lib/fontsmith.hpp>
-
+#include <otfccxx-lib/otfccxx-lib.hpp>
 int main(int argc, char *argv[]) {
 
     std::vector<uint32_t> keepThese{65, 75, 85, 97};
 
-    fontsmith::Subsetter subsetter_1;
+    otfccxx::Subsetter subsetter_1;
     subsetter_1.add_toKeep_CPs(keepThese);
     subsetter_1.add_ff_toSubset(std::filesystem::path("./IosevkaNerdFont-Regular.ttf"));
 

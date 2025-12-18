@@ -22,7 +22,7 @@ endif()
 ### Target specification ###
 ########################################################
 add_library(otfccxx-lib)
-target_sources(otfccxx-lib PRIVATE src/otfccxx-lib.cpp src/fontsmith.cpp src/fmem_file.cpp)
+target_sources(otfccxx-lib PRIVATE src/otfccxx-lib.cpp src/fmem_file.cpp)
 target_sources(otfccxx-lib
   PUBLIC
   FILE_SET pub_headers

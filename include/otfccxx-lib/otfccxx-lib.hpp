@@ -2,18 +2,23 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <expected>
-
+#include <filesystem>
+#include <memory>
 #include <span>
 #include <stdio.h>
 #include <utility>
 
+
+#include <hb-subset.hh>
 #include <json-builder.h>
 #include <nlohmann/json.hpp>
 #include <otfcc/font.h>
 #include <otfcc/options.h>
 #include <otfcc/sfnt.h>
+
 
 #include <otfccxx-lib/fmem_file.hpp>
 
@@ -22,7 +27,7 @@ namespace otfccxx {
 using font_raw = std::vector<std::byte>;
 
 enum class err : size_t {
-    uknownError = 1,
+    unknownError = 1,
     unexpectedNullptr,
     jsonAdvanceWidthKeyNotFound,
     jsonFontMissingGlyfTable,
@@ -31,6 +36,31 @@ enum class err : size_t {
     SFNT_fontStructureBrokenOrCorrupted,
 };
 
+
+enum class err_subset : size_t {
+    unknownError = 1,
+    unexpectedNullptr,
+    hb_blob_t_createFailure,
+    hb_face_t_createFailure,
+    execute_someRequestedGlyphsAreMissing,
+    subsetInput_failedToCreate,
+    hb_subset_executeFailure,
+    make_subset_noIntersectingGlyphs,
+    jsonAdvanceWidthKeyNotFound,
+    jsonFontMissingGlyfTable,
+};
+
+
+enum class err_modifier : size_t {
+    unknownError = 1,
+    unexpectedNullptr,
+    missingJSONKey,
+    unexpectedJSONValueType,
+    counterPointHasCorruptedStructure,
+    referenceHasCorruptedStructure,
+};
+
+// Simply wraps otfcc_Options
 class otfccxx_Options {
 
 public:
@@ -58,6 +88,81 @@ private:
     otfcc_Options *ptr_; // non-owning
 };
 
+
+std::expected<bool, std::filesystem::file_type> write_bytesToFile(std::filesystem::path const &p,
+                                                                  std::span<const std::byte>   bytes);
+
+class Subsetter {
+private:
+    class Impl;
+
+public:
+    Subsetter();                                 // defined in the implementation file
+
+    ~Subsetter();                                // defined in the implementation file, where impl is a complete type
+    Subsetter(Subsetter &&) noexcept;            // defined in the implementation file
+    Subsetter(const Subsetter &) = delete;
+    Subsetter &operator=(Subsetter &&) noexcept; // defined in the implementation file
+    Subsetter &operator=(const Subsetter &) = delete;
+
+
+    Subsetter &add_ff_toSubset(std::span<const char> buf, unsigned int const faceIndex = 0u);
+    Subsetter &add_ff_categoryBackup(std::span<const char> buf, unsigned int const faceIndex = 0u);
+    Subsetter &add_ff_lastResort(std::span<const char> buf, unsigned int const faceIndex = 0u);
+
+    Subsetter &add_ff_toSubset(std::filesystem::path const &pth, unsigned int const faceIndex = 0u);
+    Subsetter &add_ff_categoryBackup(std::filesystem::path const &pth, unsigned int const faceIndex = 0u);
+    Subsetter &add_ff_lastResort(std::filesystem::path const &pth, unsigned int const faceIndex = 0u);
+
+    // Subsetter &add_ff_toSubset(hb_face_t *ptr, unsigned int const faceIndex = 0u);
+    // Subsetter &add_ff_categoryBackup(hb_face_t *ptr, unsigned int const faceIndex = 0u);
+    // Subsetter &add_ff_lastResort(hb_face_t *ptr, unsigned int const faceIndex = 0u);
+
+    Subsetter &add_toKeep_CP(uint32_t cp);
+    Subsetter &add_toKeep_CPs(std::span<const uint32_t> cps);
+
+    // 1) execute() - Get 'waterfall of font faces'
+    // 2) execute_bestEffort() - Get 'waterfall of font faces' + set(in a vector) a unicode points that weren't found in
+    // any font
+    std::expected<std::vector<font_raw>, err_subset>                                   execute();
+    std::expected<std::pair<std::vector<font_raw>, std::vector<uint32_t>>, err_subset> execute_bestEffort();
+
+
+    bool       is_inError();
+    err_subset get_error();
+
+
+private:
+    std::unique_ptr<Impl> pimpl;
+};
+
+
+class Modifier {
+private:
+    class Impl;
+
+public:
+    Modifier();
+    Modifier(std::span<const std::byte> raw_ttfFont, otfccxx_Options const &opts);
+
+
+    std::expected<bool, err_subset> change_unitsPerEm(uint32_t newEmSize);
+    std::expected<bool, err_subset> change_makeMonospaced(uint32_t newAdvWidth);
+
+
+    std::expected<std::vector<font_raw>, err_subset> exportResult() {
+        if (! pimpl) { return std::unexpected(err_subset::unexpectedNullptr); }
+
+
+        return std::unexpected(err_subset::unknownError);
+    };
+
+
+private:
+    std::unique_ptr<Impl> pimpl;
+};
+
+
 inline std::expected<nlohmann::ordered_json, err> dump_toNLMJSON(std::span<const std::byte> raw_ttfFont,
                                                                  otfccxx_Options const     &opts) {
 
@@ -65,7 +170,7 @@ inline std::expected<nlohmann::ordered_json, err> dump_toNLMJSON(std::span<const
     otfcc_Font                *curFont;
     json_value                *root;
 
-    std::expected<nlohmann::ordered_json, err> res = err::uknownError;
+    std::expected<nlohmann::ordered_json, err> res = std::unexpected(err::unknownError);
 
     fmem_file fmf(raw_ttfFont);
 
@@ -147,43 +252,6 @@ public:
     Font(NLMjson &&jsonFont) : font_(std::move(jsonFont)) {}
 
     // Glyph metric modification
-    static std::expected<bool, err> transform_glyphSize(NLMjson &out_glyph, double const a, double const b,
-                                                        double const c, double const d, double const dx,
-                                                        double const dy) {
-
-        auto aw_iter = out_glyph.find("advanceWidth");
-        if (aw_iter == out_glyph.end()) { return std::unexpected(err::jsonAdvanceWidthKeyNotFound); }
-
-        (*aw_iter) = static_cast<int>(round(a * static_cast<double>(out_glyph.at("advanceWidth"))));
-
-        if (auto ah_iter = out_glyph.find("advanceHeight"); ah_iter != out_glyph.end()) {
-            (*ah_iter) = static_cast<int>(round(d * static_cast<double>(*ah_iter)));
-        }
-        if (auto vo_iter = out_glyph.find("verticalOrigin"); vo_iter != out_glyph.end()) {
-            (*vo_iter) = static_cast<int>(round(d * static_cast<double>(*vo_iter)));
-        }
-
-        if (out_glyph.find("contours") != out_glyph.end()) {
-            for (auto &contour : out_glyph["contours"]) {
-                for (auto &point : contour) {
-                    double const x = point.at("x");
-                    double const y = point.at("y");
-                    point["x"]     = static_cast<int>(a * x + b * y + dx);
-                    point["y"]     = static_cast<int>(c * x + d * y + dy);
-                }
-            }
-        }
-        if (out_glyph.find("references") != out_glyph.end()) {
-            for (auto &reference : out_glyph["references"]) {
-                double const x = reference.at("x");
-                double const y = reference.at("y");
-                reference["x"] = static_cast<int>(a * x + b * y + dx);
-                reference["y"] = static_cast<int>(c * x + d * y + dy);
-            }
-        }
-        return true;
-    }
-
     static std::expected<bool, err> transform_glyphByAW(NLMjson &out_glyph, double const newWidth) {
 
         auto aw_iter = out_glyph.find("advanceWidth");
