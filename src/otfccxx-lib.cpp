@@ -616,9 +616,10 @@ private:
         }
 
 
-        auto recSolver = [&](this auto const &self, std::string const &toSolve) -> std::expected<bool, err_modifier> {
+        auto recSolver = [&](this auto const   &self,
+                             std::string const &toSolve) -> std::expected<HLPR_glyphByAW, err_modifier> {
             if (cycleChecker.contains(toSolve)) { return std::unexpected(err_modifier::cyclicGlyfReferencesFound); }
-            else if (res.contains(toSolve)) { return false; }
+            if (auto found = res.find(toSolve); found != res.end()) { return found->second; }
 
             // Get the object we are supposed to be solving
             auto ite = mapOfRefs.find(toSolve);
@@ -633,11 +634,14 @@ private:
                 return std::unexpected(err_modifier::unexpectedJSONValueType);
             }
 
+            // Prep common fields
+            json_int_t leftBearing  = std::numeric_limits<json_int_t>::max();
+            json_int_t rightBearing = std::numeric_limits<json_int_t>::min();
+            json_int_t moveBy       = 0;
+
             // Get the contours (if N/A then skip)
             auto contoursObj = JSON_Access::get(*solveObj, "contours");
             if (contoursObj != nullptr) {
-                json_int_t leftBearing = std::numeric_limits<json_int_t>::max();
-
                 if (contoursObj->type != json_type::json_array) {
                     return std::unexpected(err_modifier::unexpectedJSONValueType);
                 }
@@ -653,12 +657,18 @@ private:
                         if (cp_xPos->type != json_type::json_integer) {
                             return std::unexpected(err_modifier::unexpectedJSONValueType);
                         }
-                        // Update minimum value
-                        leftBearing = std::min(leftBearing, cp_xPos->u.integer);
+                        // Update left and right bearings
+                        leftBearing  = std::min(leftBearing, cp_xPos->u.integer);
+                        rightBearing = std::max(rightBearing, cp_xPos->u.integer);
                     }
                 }
+                moveBy =
+                    (newWidth - adwObj->u.integer) * (leftBearing / (leftBearing + (adwObj->u.integer - rightBearing)));
 
                 // Update res;
+                if (res.insert({toSolve, {leftBearing, moveBy}}).second == false) {
+                    return std::unexpected(err_modifier::unknownError);
+                }
             }
 
             // Get the references (if N/A then skip)
@@ -667,25 +677,65 @@ private:
                 if (contoursObj != nullptr) {
                     { return std::unexpected(err_modifier::glyphHasBothCountoursAndReferences); }
                 }
-
+                if (refesObj->type != json_type::json_array) {
+                    return std::unexpected(err_modifier::unexpectedJSONValueType);
+                }
 
                 cycleChecker.insert(toSolve);
+                std::vector<HLPR_glyphByAW> glyphHLPRs;
 
-                self("next");
+                for (auto const oneRef : refesObj->u.array) {
+                    if (oneRef->type != json_type::json_object) {
+                        return std::unexpected(err_modifier::unexpectedJSONValueType);
+                    }
+
+                    auto refName = JSON_Access::get(*oneRef, "glyph");
+                    if (refName == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+                    if (refName->type != json_type::json_string) {
+                        return std::unexpected(err_modifier::unexpectedJSONValueType);
+                    }
+                    auto refXpos = JSON_Access::get(*oneRef, "x");
+                    if (refXpos == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+                    if (refXpos->type != json_type::json_integer) {
+                        return std::unexpected(err_modifier::unexpectedJSONValueType);
+                    }
+
+                    // Recursive call
+                    auto refGlyphHLPR = self(std::string(refName->u.string.ptr, refName->u.string.length));
+                    if (not refGlyphHLPR.has_value()) { return std::unexpected(refGlyphHLPR.error()); }
+
+                    glyphHLPRs.push_back(refGlyphHLPR.value());
+                    leftBearing  = std::min(leftBearing, refGlyphHLPR.value().origLSB + refXpos->u.integer);
+                    rightBearing = std::max(rightBearing, refGlyphHLPR.value().origLSB + refXpos->u.integer);
+                }
+
+                moveBy =
+                    (newWidth - adwObj->u.integer) * (leftBearing / (leftBearing + (adwObj->u.integer - rightBearing)));
+
+                for (size_t i = 0; auto const oneRef : refesObj->u.array) {
+                    auto refXpos = JSON_Access::get(*oneRef, "x");
+                    refXpos->u.integer += (moveBy - glyphHLPRs.at(i).movedBy);
+                    i++;
+                }
 
                 if (cycleChecker.erase(toSolve) != 1uz) { return std::unexpected(err_modifier::unknownError); }
-
-
-                // Update res;
             }
 
-            return true;
+
+            // Update res;
+            if (auto inserted = res.insert({toSolve, {leftBearing, moveBy}}); inserted.second == false) {
+                return std::unexpected(err_modifier::unknownError);
+            }
+            else { return inserted.first->second; }
+            std::unreachable();
         };
 
-
-        auto ttt = recSolver("aa");
-        if (not ttt.has_value()) { return std::unexpected(ttt.error()); }
-
+        // EXECUTING SOLVER
+        for (auto onePair = mapOfRefs.begin(); onePair != mapOfRefs.end(); ++onePair) {
+            // Exec for one glyph name
+            auto solveRes = recSolver(onePair->first);
+            if (not solveRes.has_value()) { return std::unexpected(solveRes.error()); }
+        }
 
         return res;
     }
