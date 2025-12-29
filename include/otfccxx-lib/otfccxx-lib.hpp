@@ -70,7 +70,7 @@ private:
 
 public:
     explicit Options() noexcept;
-    explicit Options(uint8_t optLevel) noexcept;
+    explicit Options(uint8_t const optLevel, bool const removeTTFhints = true) noexcept;
 
     Options(const Options &) = delete;
     Options &
@@ -83,7 +83,7 @@ private:
 };
 
 // 'Waterfall' subsetter that subsets a collection of fonts in a priority waterfall fashion based on the requested
-// unicode codepoints.
+// unicode codepoints. Has 'builder pattern' - like interface.
 class Subsetter {
 private:
     class Impl;
@@ -141,18 +141,21 @@ private:
     std::unique_ptr<Impl> pimpl;
 };
 
+
+// Provides high-level modification capability for TTF fonts. The functionality is very limited in scope.
+// TTF hints are always removed from the font
 class Modifier {
 private:
     class Impl;
 
 public:
-    Modifier();
-    Modifier(ByteSpan raw_ttfFont, Options const &opts = otfccxx::Options(1), uint32_t ttcindex = 0);
+    Modifier() = delete;
+    Modifier(ByteSpan raw_ttfFont, uint32_t ttcindex = 0, Options const &opts = otfccxx::Options(1, true));
     ~Modifier();
 
     // Changing dimensions of glyphs
     std::expected<bool, err_modifier>
-    change_unitsPerEm(uint32_t newEmSize, bool removeTTFhints = true);
+    change_unitsPerEm(uint32_t newEmSize);
     std::expected<bool, err_modifier>
     change_makeMonospaced(uint32_t targetAdvWidth);
 
@@ -161,7 +164,7 @@ public:
 
     // Modifications of other values and properties
     std::expected<bool, err_modifier>
-    remove_ttfHints();
+    __remove_ttfHints();
 
 
     // Export

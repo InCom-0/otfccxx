@@ -3,6 +3,7 @@
 #include <fstream>
 #include <limits>
 #include <ranges>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -74,6 +75,90 @@ using hb_subset_input_uptr = std::unique_ptr<hb_subset_input_t, detail::_hb_subs
 using json_value_uptr = std::unique_ptr<json_value, detail::_json_value_uptr_deleter>;
 using otfcc_opt_uptr  = std::unique_ptr<otfcc_Options, detail::_otfcc_opt_uptr_deleter>;
 
+namespace json_ext {
+
+// Helper to free a json_value and its children (simple recursive free)
+static void
+free_jsonValue(json_value *val) {
+    if (! val) { return; }
+
+    switch (val->type) {
+        case json_object:
+            {
+                for (unsigned int i = 0; i < val->u.object.length; ++i) {
+                    json_object_entry &entry = val->u.object.values[i];
+
+                    // Free key name (heap allocated by otfcc)
+                    std::free(entry.name);
+
+                    // Free value subtree
+                    free_jsonValue(entry.value);
+                }
+
+                std::free(val->u.object.values);
+                break;
+            }
+
+        case json_array:
+            {
+                for (unsigned int i = 0; i < val->u.array.length; ++i) { free_jsonValue(val->u.array.values[i]); }
+
+                std::free(val->u.array.values);
+                break;
+            }
+
+        case json_string:
+            // otfcc allocates strings
+            std::free(val->u.string.ptr);
+            break;
+
+        case json_integer:
+        case json_double:
+        case json_boolean:
+        case json_null:
+        case json_none:
+        default:           break;
+    }
+
+    std::free(val);
+}
+
+// Remove a named member from a JSON object.
+// Returns true if something was removed.
+static std::expected<bool, err_modifier>
+remove_objectMemberByName(json_value *obj, std::string_view key) {
+    if (! obj) { return false; }
+    if (obj->type != json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
+
+    size_t write_i = 0;
+    bool   removed = false;
+
+    for (size_t i = 0; i < obj->u.object.length; ++i) {
+        auto &entry = obj->u.object.values[i];
+
+        if (! removed && std::string_view(entry.name) == key) {
+            // Free the value for the removed member
+            free_jsonValue(entry.value);
+            removed = true;
+            continue; // skip adding to new slot
+        }
+
+        // compact in place
+        if (write_i != i) { obj->u.object.values[write_i] = entry; }
+        ++write_i;
+    }
+
+    if (! removed) { return false; }
+
+    // Shrink array
+    obj->u.object.length = write_i;
+    obj->u.object.values =
+        (decltype(obj->u.object.values))std::realloc(obj->u.object.values, write_i * sizeof(*obj->u.object.values));
+
+    return true;
+}
+} // namespace json_ext
+
 struct AccessInfo {
     bool readable;
     bool writable;
@@ -141,16 +226,22 @@ write_bytesToFile(std::filesystem::path const &p, ByteSpan bytes) {
     return outs.good();
 }
 
+
+// #####################################################################
+// ### Options implementaion ###
+// #####################################################################
+
 class Options::Impl {
     friend class Modifier;
 
 public:
     Impl() : _opts(otfcc_newOptions()) {}
-    Impl(uint8_t optLevel) : _opts(otfcc_newOptions()) {
+    Impl(uint8_t const optLevel, bool const removeTTFhints) : _opts(otfcc_newOptions()) {
         otfcc_Options_optimizeTo(_opts.get(), optLevel);
         _opts->logger = otfcc_newLogger(otfcc_newStdErrTarget());
         _opts->logger->indent(_opts->logger, "[missing]");
         _opts->decimal_cmap = true;
+        _opts->ignore_hints = removeTTFhints;
     }
 
 private:
@@ -159,10 +250,15 @@ private:
 
 
 Options::Options() noexcept : pimpl(std::make_unique<Impl>()) {}
-Options::Options(uint8_t optLevel) noexcept : pimpl(std::make_unique<Impl>(optLevel)) {}
+Options::Options(uint8_t const optLevel, bool const removeTTFhints) noexcept
+    : pimpl(std::make_unique<Impl>(optLevel, removeTTFhints)) {}
 
 Options::~Options() = default;
 
+
+// #####################################################################
+// ### Subsetter implementation ###
+// #####################################################################
 
 class Subsetter::Impl {
     friend class Subsetter;
@@ -460,13 +556,18 @@ Subsetter::get_error() {
     return pimpl->inError.value();
 }
 
+
+// #####################################################################
+// ### Modifier implementation ###
+// #####################################################################
+
 class Modifier::Impl {
     friend class Modifier;
 
 public:
-    Impl() {}
-    Impl(Bytes const &ttf) {}
-    Impl(ByteSpan raw_ttfFont, Options const &opts, uint32_t ttcindex = 0) {
+    Impl() = delete;
+    // Impl(Bytes const &ttf) {}
+    Impl(ByteSpan raw_ttfFont, Options const &opts, uint32_t ttcindex) {
         otfccxx::fmem_file memfile(raw_ttfFont);
 
         otfcc_SplineFontContainer *sfnt = otfcc_readSFNT(memfile.get());
@@ -551,7 +652,7 @@ private:
     }
 
     std::expected<size_t, err_modifier>
-    transform_glyphsSize(uint32_t newEmSize, bool removeTTFhints = true) {
+    transform_glyphsSize(uint32_t newEmSize) {
         if (not _jsonFont) { return std::unexpected(err_modifier::unexpectedNullptr); }
         auto ht_ptr = JSON_Access::get(*_jsonFont, "head");
         if (ht_ptr == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
@@ -585,7 +686,6 @@ private:
         }
         return res;
     }
-
 
     std::expected<std::unordered_map<std::string, HLPR_glyphByAW>, err_modifier>
     transform_glyphsByAW(json_int_t const newWidth, auto const &pred_keepSameADW) {
@@ -628,6 +728,17 @@ private:
             json_int_t rightBearing = std::numeric_limits<json_int_t>::min();
             json_int_t moveBy       = 0;
 
+            auto const compute_moveBy = [&]() -> json_int_t {
+                double ratio =
+                    (leftBearing - (adwObj->u.integer / 2.0)) / (rightBearing - ((adwObj->u.integer | 1) / 2.0));
+                ratio += (ratio == 1.0) * std::numeric_limits<double>::min();
+
+                double const LN = leftBearing - (newWidth / 2.0);
+                double const RN = rightBearing - (newWidth / 2.0);
+
+                return (((RN * ratio) - LN) / (1.0 - ratio));
+            };
+
             // Get the contours (if N/A then skip)
             auto contoursObj = JSON_Access::get(*solveObj, "contours");
             if (contoursObj != nullptr) {
@@ -654,8 +765,11 @@ private:
 
                 if (keepSameADW) { moveBy = 0; }
                 else {
-                    moveBy = (newWidth - adwObj->u.integer) *
-                             (static_cast<double>(leftBearing) / (leftBearing + (adwObj->u.integer - rightBearing)));
+                    moveBy = compute_moveBy();
+
+                    // Old and impefect
+                    // moveBy = (newWidth - adwObj->u.integer) *
+                    //          (static_cast<double>(leftBearing) / (leftBearing + (adwObj->u.integer - rightBearing)));
                 }
 
                 for (auto const oneCont : contoursObj->u.array) {
@@ -707,8 +821,11 @@ private:
 
                 if (keepSameADW) { moveBy = 0; }
                 else {
-                    moveBy = (newWidth - adwObj->u.integer) *
-                             (static_cast<double>(leftBearing) / (leftBearing + (adwObj->u.integer - rightBearing)));
+                    moveBy = compute_moveBy();
+
+                    // Old and impefect
+                    // moveBy = (newWidth - adwObj->u.integer) *
+                    //          (static_cast<double>(leftBearing) / (leftBearing + (adwObj->u.integer - rightBearing)));
                 }
 
                 for (size_t i = 0; auto const oneRef : refesObj->u.array) {
@@ -743,7 +860,14 @@ private:
         return res;
     }
 
+    // Other modifications
+    std::expected<bool, err_modifier>
+    remove_tableByName(std::string_view sv) {
+        return json_ext::remove_objectMemberByName(_jsonFont.get(), sv);
+    }
 
+
+    // Export
     std::expected<Bytes, err_modifier>
     exportResult(Options const &opts) {
 
@@ -898,17 +1022,16 @@ private:
     json_value_uptr _jsonFont;
 };
 
-Modifier::Modifier() : pimpl(std::make_unique<Impl>()) {}
 
-Modifier::Modifier(ByteSpan raw_ttfFont, Options const &opts, uint32_t ttcindex)
+Modifier::Modifier(ByteSpan raw_ttfFont, uint32_t ttcindex, Options const &opts)
     : pimpl(std::make_unique<Impl>(raw_ttfFont, opts, ttcindex)) {}
 
 Modifier::~Modifier() = default;
 
 // Changing dimensions of glyphs
 std::expected<bool, err_modifier>
-Modifier::change_unitsPerEm(uint32_t newEmSize, bool removeTTFhints) {
-    auto exp_res = pimpl->transform_glyphsSize(newEmSize, removeTTFhints);
+Modifier::change_unitsPerEm(uint32_t newEmSize) {
+    auto exp_res = pimpl->transform_glyphsSize(newEmSize);
     if (not exp_res.has_value()) { return std::unexpected(exp_res.error()); }
     return true;
 }
@@ -924,14 +1047,25 @@ Modifier::change_makeMonospaced(uint32_t targetAdvWidth) {
 
 // Modifications of other values and properties
 
+// THIS FUNCTION IS FAKE
+std::expected<bool, err_modifier>
+Modifier::__remove_ttfHints() {
+    auto r = json_ext::remove_objectMemberByName(pimpl->_jsonFont.get(), "");
+    if (r.has_value()) { return true; }
+    return false;
+}
 
 // Export
 std::expected<Bytes, err_modifier>
 Modifier::exportResult(Options const &opts) {
     if (! pimpl) { return std::unexpected(err_modifier::unexpectedNullptr); }
     else { return pimpl->exportResult(opts); }
-};
+}
 
+
+// #####################################################################
+// ### Converter implementation ###
+// #####################################################################
 
 size_t
 Converter::max_compressed_size(ByteSpan data) {
