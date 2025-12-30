@@ -50,6 +50,8 @@ enum class err_modifier : size_t {
     cyclicGlyfReferencesFound,
     missingGlyphInGlyfTable,
     glyphHasBothCountoursAndReferences,
+    ratioAdvWidthToEmSize_cannotBeNegative,
+    ratioAdvWidthToEmSize_cannotBeOver2,
 };
 enum class err_converter : size_t {
     unknownError = 1,
@@ -157,7 +159,9 @@ public:
     std::expected<bool, err_modifier>
     change_unitsPerEm(uint32_t newEmSize);
     std::expected<bool, err_modifier>
-    change_makeMonospaced(uint32_t targetAdvWidth);
+    change_makeMonospaced(uint32_t const targetAdvWidth);
+    std::expected<bool, err_modifier>
+    change_makeMonospaced_byEmRatio(double const emRatio);
 
     // Filtering of font content (ie. deleting parts of the font)
 

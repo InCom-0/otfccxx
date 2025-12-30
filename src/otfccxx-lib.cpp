@@ -4,7 +4,6 @@
 #include <limits>
 #include <optional>
 #include <ranges>
-#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -14,6 +13,7 @@
 #include <hb-set.hh>
 #include <hb-subset.h>
 
+#include <utility>
 #include <woff2/decode.h>
 #include <woff2/encode.h>
 #include <woff2/output.h>
@@ -188,41 +188,72 @@ remove_objectMemberByName(json_value *obj, std::string_view key) {
     return true;
 }
 
-static std::expected<json_value *, err_modifier>
-get_byNames(json_value *root, std::vector<std::string_view> const &toGet) {
+// static std::expected<json_value *, err_modifier>
+// get_byNames(json_value *root, std::vector<std::string_view> const &toGet) {
+//     if (root == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+//     json_value *cur = root;
+//
+//     for (auto &oneSV : toGet) {
+//         cur = get(*cur, oneSV);
+//         if (cur == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+//     }
+//     return cur;
+// }
+
+// static std::expected<std::vector<json_value *>, err_modifier>
+// get_byNamesInTree(json_value *root, std::vector<std::vector<std::string_view>> const &toGet) {
+//     if (root == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+//     size_t                    curLvl = 0;
+//     std::vector<json_value *> res;
+//
+//     auto const recSolver = [&](this auto const &self, json_value *cur) -> std::optional<err_modifier> {
+//         if (curLvl == toGet.size()) {
+//             res.push_back(cur);
+//             return std::nullopt;
+//         }
+//         for (auto const &oneName : toGet.at(curLvl)) {
+//             auto newJV = get(*cur, oneName);
+//             if (newJV == nullptr) { return err_modifier::missingJSONKey; }
+//
+//             curLvl++;
+//             if (auto res = self(newJV); res.has_value()) { return res; }
+//             curLvl--;
+//         }
+//         return std::nullopt;
+//     };
+//
+//     if (auto res = recSolver(root); res.has_value()) { return std::unexpected(res.value()); }
+//     return res;
+// }
+
+static std::expected<std::vector<std::optional<json_value *>>, err_modifier>
+getMaybe_byNamesInTree(json_value *root, std::vector<std::vector<std::string_view>> const &toGet) {
     if (root == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
-    json_value *cur = root;
+    size_t                                   curLvl = 0;
+    std::vector<std::optional<json_value *>> res;
 
-    for (auto &oneSV : toGet) {
-        cur = get(*cur, oneSV);
-        if (cur == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
-    }
-    return cur;
-}
-
-static std::expected<std::vector<json_value *>, err_modifier>
-get_byNamesInTree(json_value *root, std::vector<std::vector<std::string_view>> const &toGet) {
-    if (root == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
-    size_t                    curLvl = 0;
-    std::vector<json_value *> res;
-
-    auto const recSolver = [&](this auto const &self, json_value *cur) -> std::optional<err_modifier> {
+    auto const recSolver = [&](this auto const &self, json_value *cur) -> void {
         if (curLvl == toGet.size()) {
             res.push_back(cur);
-            return std::nullopt;
+            return;
         }
         for (auto const &oneName : toGet.at(curLvl)) {
             auto newJV = get(*cur, oneName);
-            if (newJV == nullptr) { return err_modifier::missingJSONKey; }
+            if (newJV == nullptr) {
+                size_t curLvlCpy      = curLvl;
+                size_t emptyOptsCount = 1;
+                while (++curLvlCpy < toGet.size()) { emptyOptsCount *= toGet.at(curLvlCpy).size(); }
+                while (emptyOptsCount-- > 0) { res.push_back(std::nullopt); }
+                continue;
+            }
 
             curLvl++;
-            if (auto res = self(newJV); res.has_value()) { return res; }
+            self(newJV);
             curLvl--;
         }
-        return std::nullopt;
     };
 
-    if (auto res = recSolver(root); res.has_value()) { return std::unexpected(res.value()); }
+    recSolver(root);
     return res;
 }
 
@@ -711,8 +742,7 @@ private:
         if (upem == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
         if (upem->type != json_type::json_integer) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
 
-        double const a = (static_cast<double>(newEmSize) / upem->u.integer), b = 0, c = 0,
-                     d = (static_cast<double>(newEmSize) / upem->u.integer), dx = 0, dy = 0;
+        double const a = (static_cast<double>(newEmSize) / upem->u.integer), b = 0, c = 0, d = a, dx = 0, dy = 0;
         upem->u.integer = newEmSize;
 
         auto gt_ptr = json_ext::get(*_jsonFont, "glyf"sv);
@@ -733,6 +763,8 @@ private:
             }
             else { res += oneTransformRes.value(); }
         }
+
+        if (auto res = _pureChange_AscDescLG(a); not res.has_value()) { return std::unexpected(res.error()); }
         return res;
     }
 
@@ -1071,7 +1103,26 @@ private:
     std::expected<bool, err_modifier>
     _pureChange_AscDescLG(double const multiplier) {
 
-        return true;
+        auto hheaFields =
+            json_ext::getMaybe_byNamesInTree(_jsonFont.get(), {{"hhea"sv}, {"ascender"sv, "descender"sv, "lineGap"sv}});
+        if (not hheaFields.has_value()) { return std::unexpected(hheaFields.error()); }
+
+        auto OS2Fields = json_ext::getMaybe_byNamesInTree(
+            _jsonFont.get(),
+            {{"OS_2"sv}, {"sTypoAscender"sv, "sTypoDescender"sv, "sTypoLineGap"sv, "usWinAscent"sv, "usWinDescent"sv}});
+        if (not OS2Fields.has_value()) { return std::unexpected(OS2Fields.error()); }
+
+        auto adjustOne = [&](std::optional<json_value *> const &toAdjust) -> bool {
+            if (not toAdjust.has_value() || toAdjust.value()->type != json_type::json_integer) { return false; }
+            toAdjust.value()->u.integer *= multiplier;
+            return true;
+        };
+
+        bool res = true;
+        for (auto const &item : hheaFields.value()) { res &= adjustOne(item); }
+        for (auto const &item : OS2Fields.value()) { res &= adjustOne(item); }
+
+        return res;
     }
 
 
@@ -1100,10 +1151,30 @@ Modifier::change_unitsPerEm(uint32_t newEmSize) {
     return true;
 }
 std::expected<bool, err_modifier>
-Modifier::change_makeMonospaced(uint32_t targetAdvWidth) {
+Modifier::change_makeMonospaced(uint32_t const targetAdvWidth) {
     auto exp_res = pimpl->transform_allGlyphsByAW(targetAdvWidth, Modifier::Impl::_Detail::default_ksADW);
     if (not exp_res.has_value()) { return std::unexpected(exp_res.error()); }
     return true;
+}
+
+std::expected<bool, err_modifier>
+Modifier::change_makeMonospaced_byEmRatio(double const emRatio) {
+    if (emRatio > 2.0) { return std::unexpected(err_modifier::ratioAdvWidthToEmSize_cannotBeOver2); }
+    if (emRatio < 0.0) { return std::unexpected(err_modifier::ratioAdvWidthToEmSize_cannotBeNegative); }
+
+    if (pimpl->_jsonFont == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+
+    if (auto const emsz = json_ext::getMaybe_byNamesInTree(pimpl->_jsonFont.get(), {{"head"sv}, {"unitsPerEm"sv}});
+        not emsz.has_value()) {
+        return std::unexpected(err_modifier::unexpectedNullptr);
+    }
+    else if (not emsz.value().front().has_value()) { return std::unexpected(err_modifier::missingJSONKey); }
+    else if (emsz.value().front().value()->type != json_type::json_integer) {
+        return std::unexpected(err_modifier::unexpectedJSONValueType);
+    }
+    else { return change_makeMonospaced(static_cast<uint32_t>(emsz.value().front().value()->u.integer * emRatio)); }
+
+    std::unreachable();
 }
 
 // Filtering of font content (ie. deleting parts of the font)
