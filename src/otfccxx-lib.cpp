@@ -2,6 +2,7 @@
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <ranges>
 #include <string_view>
 #include <unordered_map>
@@ -24,6 +25,7 @@
 #include <otfcc/otfcc_api.h>
 
 namespace otfccxx {
+using namespace std::literals;
 
 namespace detail {
 struct _hb_face_uptr_deleter {
@@ -76,6 +78,34 @@ using json_value_uptr = std::unique_ptr<json_value, detail::_json_value_uptr_del
 using otfcc_opt_uptr  = std::unique_ptr<otfcc_Options, detail::_otfcc_opt_uptr_deleter>;
 
 namespace json_ext {
+
+static struct _json_value *
+get(json_value const &rf, std::string_view key) {
+    if (rf.type == json_object) {
+        for (unsigned int i = 0; i < rf.u.object.length; ++i) {
+            if (std::string_view(rf.u.object.values[i].name, rf.u.object.values[i].name_length) == key) {
+                return rf.u.object.values[i].value;
+            }
+        }
+    }
+    return nullptr;
+}
+
+// static struct _json_value *
+// get(json_value const &rf, const char *key) {
+//     if (rf.type == json_object) {
+//         for (unsigned int i = 0; i < rf.u.object.length; ++i) {
+//             if (! strcmp(rf.u.object.values[i].name, key)) { return rf.u.object.values[i].value; }
+//         }
+//     }
+//     return nullptr;
+// }
+
+// static struct _json_value *
+// get(json_value const &rf, int index) {
+//     if (rf.type != json_array || index < 0 || ((unsigned int)index) >= rf.u.array.length) { return nullptr; }
+//     return rf.u.array.values[index];
+// }
 
 // Helper to free a json_value and its children (simple recursive free)
 static void
@@ -157,6 +187,46 @@ remove_objectMemberByName(json_value *obj, std::string_view key) {
 
     return true;
 }
+
+static std::expected<json_value *, err_modifier>
+get_byNames(json_value *root, std::vector<std::string_view> const &toGet) {
+    if (root == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+    json_value *cur = root;
+
+    for (auto &oneSV : toGet) {
+        cur = get(*cur, oneSV);
+        if (cur == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+    }
+    return cur;
+}
+
+static std::expected<std::vector<json_value *>, err_modifier>
+get_byNamesInTree(json_value *root, std::vector<std::vector<std::string_view>> const &toGet) {
+    if (root == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+    size_t                    curLvl = 0;
+    std::vector<json_value *> res;
+
+    auto const recSolver = [&](this auto const &self, json_value *cur) -> std::optional<err_modifier> {
+        if (curLvl == toGet.size()) {
+            res.push_back(cur);
+            return std::nullopt;
+        }
+        for (auto const &oneName : toGet.at(curLvl)) {
+            auto newJV = get(*cur, oneName);
+            if (newJV == nullptr) { return err_modifier::missingJSONKey; }
+
+            curLvl++;
+            if (auto res = self(newJV); res.has_value()) { return res; }
+            curLvl--;
+        }
+        return std::nullopt;
+    };
+
+    if (auto res = recSolver(root); res.has_value()) { return std::unexpected(res.value()); }
+    return res;
+}
+
+
 } // namespace json_ext
 
 struct AccessInfo {
@@ -597,27 +667,6 @@ public:
     ~Impl() = default;
 
 private:
-    class JSON_Access {
-        friend class Modifier::Impl;
-
-    private:
-        static inline struct _json_value *
-        get(json_value const &rf, const char *key) {
-            if (rf.type == json_object) {
-                for (unsigned int i = 0; i < rf.u.object.length; ++i) {
-                    if (! strcmp(rf.u.object.values[i].name, key)) { return rf.u.object.values[i].value; }
-                }
-            }
-            return nullptr;
-        }
-
-        static inline struct _json_value *
-        get(json_value const &rf, int index) {
-            if (rf.type != json_array || index < 0 || ((unsigned int)index) >= rf.u.array.length) { return nullptr; }
-            return rf.u.array.values[index];
-        }
-    };
-
     struct HLPR_glyphByAW {
         json_int_t origLSB  = 0;
         json_int_t movedByH = 0;
@@ -625,7 +674,7 @@ private:
 
     struct _Detail {
         static constexpr auto default_ksADW = [](const _json_value &glyphObj) -> bool {
-            auto adwObj = JSON_Access::get(glyphObj, "advanceWidth");
+            auto adwObj = json_ext::get(glyphObj, "advanceWidth"sv);
             if (adwObj->u.integer == 0) { return true; }
             return false;
         };
@@ -652,13 +701,13 @@ private:
     }
 
     std::expected<size_t, err_modifier>
-    transform_glyphsSize(uint32_t newEmSize) {
+    transform_allGlyphsSize(uint32_t newEmSize) {
         if (not _jsonFont) { return std::unexpected(err_modifier::unexpectedNullptr); }
-        auto ht_ptr = JSON_Access::get(*_jsonFont, "head");
+        auto ht_ptr = json_ext::get(*_jsonFont, "head"sv);
         if (ht_ptr == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
         if (ht_ptr->type != json_type::json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
 
-        auto upem = JSON_Access::get(*ht_ptr, "unitsPerEm");
+        auto upem = json_ext::get(*ht_ptr, "unitsPerEm"sv);
         if (upem == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
         if (upem->type != json_type::json_integer) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
 
@@ -666,7 +715,7 @@ private:
                      d = (static_cast<double>(newEmSize) / upem->u.integer), dx = 0, dy = 0;
         upem->u.integer = newEmSize;
 
-        auto gt_ptr = JSON_Access::get(*_jsonFont, "glyf");
+        auto gt_ptr = json_ext::get(*_jsonFont, "glyf"sv);
         if (gt_ptr == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
         if (gt_ptr->type != json_type::json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
         auto const &glyfs = *gt_ptr;
@@ -688,13 +737,13 @@ private:
     }
 
     std::expected<std::unordered_map<std::string, HLPR_glyphByAW>, err_modifier>
-    transform_glyphsByAW(json_int_t const newWidth, auto const &pred_keepSameADW) {
+    transform_allGlyphsByAW(json_int_t const newWidth, auto const &pred_keepSameADW) {
         if (not _jsonFont) { return std::unexpected(err_modifier::unexpectedNullptr); }
 
         std::unordered_map<std::string, HLPR_glyphByAW> res{};
         std::unordered_set<std::string>                 cycleChecker{};
 
-        auto gt_ptr = JSON_Access::get(*_jsonFont, "glyf");
+        auto gt_ptr = json_ext::get(*_jsonFont, "glyf"sv);
         if (gt_ptr == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
         if (gt_ptr->type != json_type::json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
         auto const &glyfs = *gt_ptr;
@@ -716,7 +765,7 @@ private:
             if (solveObj == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
 
             // Get advanceWidth (that must be there)
-            auto adwObj = JSON_Access::get(*solveObj, "advanceWidth");
+            auto adwObj = json_ext::get(*solveObj, "advanceWidth"sv);
             if (adwObj == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
             if (adwObj->type != json_type::json_integer) {
                 return std::unexpected(err_modifier::unexpectedJSONValueType);
@@ -740,7 +789,7 @@ private:
             };
 
             // Get the contours (if N/A then skip)
-            auto contoursObj = JSON_Access::get(*solveObj, "contours");
+            auto contoursObj = json_ext::get(*solveObj, "contours"sv);
             if (contoursObj != nullptr) {
                 if (contoursObj->type != json_type::json_array) {
                     return std::unexpected(err_modifier::unexpectedJSONValueType);
@@ -753,7 +802,7 @@ private:
                         if (cp->type != json_type::json_object) {
                             return std::unexpected(err_modifier::unexpectedJSONValueType);
                         }
-                        auto cp_xPos = JSON_Access::get(*cp, "x");
+                        auto cp_xPos = json_ext::get(*cp, "x"sv);
                         if (cp_xPos->type != json_type::json_integer) {
                             return std::unexpected(err_modifier::unexpectedJSONValueType);
                         }
@@ -774,7 +823,7 @@ private:
 
                 for (auto const oneCont : contoursObj->u.array) {
                     for (auto const oneContPoint : oneCont->u.array) {
-                        auto refXpos        = JSON_Access::get(*oneContPoint, "x");
+                        auto refXpos        = json_ext::get(*oneContPoint, "x"sv);
                         // Move the countour points by moveBy
                         refXpos->u.integer += moveBy;
                     }
@@ -782,7 +831,7 @@ private:
             }
 
             // Get the references (if N/A then skip)
-            auto refesObj = JSON_Access::get(*solveObj, "references");
+            auto refesObj = json_ext::get(*solveObj, "references"sv);
             if (refesObj != nullptr) {
                 if (contoursObj != nullptr) {
                     { return std::unexpected(err_modifier::glyphHasBothCountoursAndReferences); }
@@ -799,12 +848,12 @@ private:
                         return std::unexpected(err_modifier::unexpectedJSONValueType);
                     }
 
-                    auto refName = JSON_Access::get(*oneRef, "glyph");
+                    auto refName = json_ext::get(*oneRef, "glyph"sv);
                     if (refName == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
                     if (refName->type != json_type::json_string) {
                         return std::unexpected(err_modifier::unexpectedJSONValueType);
                     }
-                    auto refXpos = JSON_Access::get(*oneRef, "x");
+                    auto refXpos = json_ext::get(*oneRef, "x"sv);
                     if (refXpos == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
                     if (refXpos->type != json_type::json_integer) {
                         return std::unexpected(err_modifier::unexpectedJSONValueType);
@@ -829,7 +878,7 @@ private:
                 }
 
                 for (size_t i = 0; auto const oneRef : refesObj->u.array) {
-                    auto refXpos        = JSON_Access::get(*oneRef, "x");
+                    auto refXpos        = json_ext::get(*oneRef, "x"sv);
                     // Move the anchors for references by moveBy but exclude the move already done inside the refed
                     // glyph
                     refXpos->u.integer += (moveBy - glyphHLPRs.at(i).movedByH);
@@ -871,6 +920,10 @@ private:
     std::expected<Bytes, err_modifier>
     exportResult(Options const &opts) {
 
+        // 'Finalize' font for export. IE. Do the things that the underlying otfcc library doesn't do
+        auto preExp_res = _preExport_finalize();
+        if (not preExp_res.has_value()) { return std::unexpected(preExp_res.error()); }
+
         otfcc_Font         *font;
         otfcc_IFontBuilder *parser = otfcc_newJsonReader();
         font                       = parser->read(_jsonFont.get(), 0, opts.pimpl.get()->_opts.get());
@@ -895,7 +948,7 @@ private:
     // 'Doubly' private not really for use by any other class
     static std::expected<bool, err_modifier>
     _pureChange_ADW(json_value &out_glyph, double const a) {
-        auto adW = JSON_Access::get(out_glyph, "advanceWidth");
+        auto adW = json_ext::get(out_glyph, "advanceWidth"sv);
         if (adW == nullptr) { return std::unexpected(err_modifier::missingJSONKey); }
         else if (adW->type != json_type::json_integer) {
             return std::unexpected(err_modifier::unexpectedJSONValueType);
@@ -905,7 +958,7 @@ private:
     }
     static std::expected<bool, err_modifier>
     _pureChange_ADH(json_value &out_glyph, double const d) {
-        auto adH = JSON_Access::get(out_glyph, "advanceHeight");
+        auto adH = json_ext::get(out_glyph, "advanceHeight"sv);
         if (adH != nullptr) {
             if (adH->type != json_type::json_integer) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
             adH->u.integer = static_cast<json_int_t>(round(d * adH->u.integer));
@@ -915,7 +968,7 @@ private:
     }
     static std::expected<bool, err_modifier>
     _pureChange_VertO(json_value &out_glyph, double const d) {
-        auto vertO = JSON_Access::get(out_glyph, "verticalOrigin");
+        auto vertO = json_ext::get(out_glyph, "verticalOrigin"sv);
         if (vertO != nullptr) {
             if (vertO->type != json_type::json_integer) {
                 return std::unexpected(err_modifier::unexpectedJSONValueType);
@@ -925,11 +978,10 @@ private:
         }
         return false;
     }
-
     static std::expected<bool, err_modifier>
     _pureChange_CPs(json_value &out_glyph, double const a, double const b, double const c, double const d,
                     double const dx, double const dy) {
-        auto countours = JSON_Access::get(out_glyph, "contours");
+        auto countours = json_ext::get(out_glyph, "contours"sv);
         if (countours != nullptr) {
             if (countours->type != json_type::json_array) {
                 return std::unexpected(err_modifier::unexpectedJSONValueType);
@@ -972,11 +1024,10 @@ private:
         }
         return false;
     }
-
     static std::expected<bool, err_modifier>
     _pureChange_RefAnchors(json_value &out_glyph, double const a, double const b, double const c, double const d,
                            double const dx, double const dy) {
-        auto references = JSON_Access::get(out_glyph, "references");
+        auto references = json_ext::get(out_glyph, "references"sv);
         if (references != nullptr) {
             if (references->type != json_type::json_array) {
                 return std::unexpected(err_modifier::unexpectedJSONValueType);
@@ -1017,6 +1068,19 @@ private:
         return false;
     }
 
+    std::expected<bool, err_modifier>
+    _pureChange_AscDescLG(double const multiplier) {
+
+        return true;
+    }
+
+
+    // MANDATORY TO IMPLEMENT BEFORE RELEASE
+    std::expected<size_t, err_modifier>
+    _preExport_finalize() {
+        return 0uz;
+    }
+
 
 private:
     json_value_uptr _jsonFont;
@@ -1031,13 +1095,13 @@ Modifier::~Modifier() = default;
 // Changing dimensions of glyphs
 std::expected<bool, err_modifier>
 Modifier::change_unitsPerEm(uint32_t newEmSize) {
-    auto exp_res = pimpl->transform_glyphsSize(newEmSize);
+    auto exp_res = pimpl->transform_allGlyphsSize(newEmSize);
     if (not exp_res.has_value()) { return std::unexpected(exp_res.error()); }
     return true;
 }
 std::expected<bool, err_modifier>
 Modifier::change_makeMonospaced(uint32_t targetAdvWidth) {
-    auto exp_res = pimpl->transform_glyphsByAW(targetAdvWidth, Modifier::Impl::_Detail::default_ksADW);
+    auto exp_res = pimpl->transform_allGlyphsByAW(targetAdvWidth, Modifier::Impl::_Detail::default_ksADW);
     if (not exp_res.has_value()) { return std::unexpected(exp_res.error()); }
     return true;
 }
@@ -1050,7 +1114,7 @@ Modifier::change_makeMonospaced(uint32_t targetAdvWidth) {
 // THIS FUNCTION IS FAKE
 std::expected<bool, err_modifier>
 Modifier::__remove_ttfHints() {
-    auto r = json_ext::remove_objectMemberByName(pimpl->_jsonFont.get(), "");
+    auto r = json_ext::remove_objectMemberByName(pimpl->_jsonFont.get(), ""sv);
     if (r.has_value()) { return true; }
     return false;
 }
