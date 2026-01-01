@@ -5,6 +5,7 @@
 #include <limits>
 #include <optional>
 #include <ranges>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -67,7 +68,12 @@ struct _otfcc_opt_uptr_deleter {
     }
 };
 
-
+struct Default_FNs {
+    static constexpr auto ret_onObjRemoval = [](const json_object_entry &json_oe) -> std::string {
+        if (json_oe.name == nullptr) { return std::string{""}; }
+        return std::string(json_oe.name, json_oe.name_length);
+    };
+};
 } // namespace detail
 
 using hb_face_uptr         = std::unique_ptr<hb_face_t, detail::_hb_face_uptr_deleter>;
@@ -79,6 +85,7 @@ using json_value_uptr = std::unique_ptr<json_value, detail::_json_value_uptr_del
 using otfcc_opt_uptr  = std::unique_ptr<otfcc_Options, detail::_otfcc_opt_uptr_deleter>;
 
 namespace json_ext {
+
 
 static struct _json_value *
 get(json_value const &rf, std::string_view key) {
@@ -121,7 +128,6 @@ free_jsonValue(json_value *val) {
 
                     // Free key name (heap allocated by otfcc)
                     std::free(entry.name);
-
                     // Free value subtree
                     free_jsonValue(entry.value);
                 }
@@ -129,15 +135,12 @@ free_jsonValue(json_value *val) {
                 std::free(val->u.object.values);
                 break;
             }
-
         case json_array:
             {
                 for (unsigned int i = 0; i < val->u.array.length; ++i) { free_jsonValue(val->u.array.values[i]); }
-
                 std::free(val->u.array.values);
                 break;
             }
-
         case json_string:
             // otfcc allocates strings
             std::free(val->u.string.ptr);
@@ -188,6 +191,80 @@ remove_objectMemberByName(json_value *obj, std::string_view key) {
 
     return true;
 }
+
+template <typename P>
+requires std::predicate<P, const json_object_entry &>
+[[maybe_unused]] static std::expected<size_t, err_modifier>
+remove_objectMembers(json_value *obj, P const pred) {
+    if (! obj) { return false; }
+    if (obj->type != json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
+
+    size_t write_i = 0;
+    size_t removed = 0uz;
+
+    for (size_t i = 0; i < obj->u.object.length; ++i) {
+        auto &entry = obj->u.object.values[i];
+
+        if (pred(entry)) {
+            // Free the value for the removed member
+            free_jsonValue(entry.value);
+            removed++;
+            continue; // skip adding to new slot
+        }
+
+        // compact in place
+        if (write_i != i) { obj->u.object.values[write_i] = entry; }
+        ++write_i;
+    }
+
+    // Shrink array if we did some removal. It is not an error to remove nothing
+    if (write_i != obj->u.object.length) {
+        obj->u.object.length = write_i;
+        obj->u.object.values =
+            (decltype(obj->u.object.values))std::realloc(obj->u.object.values, write_i * sizeof(*obj->u.object.values));
+    }
+
+    return removed;
+}
+
+template <typename P, typename EXTR_FN>
+requires std::predicate<P, const json_object_entry &> && std::invocable<EXTR_FN, const json_object_entry &>
+static auto
+remove_objectMembers(json_value *obj, P const pred, EXTR_FN const extr_fn)
+    -> std::expected<std::vector<std::invoke_result_t<EXTR_FN, const json_object_entry &>>, err_modifier> {
+
+    if (! obj) { return false; }
+    if (obj->type != json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
+
+    size_t                                                                write_i = 0;
+    std::vector<std::invoke_result_t<EXTR_FN, const json_object_entry &>> contentFromRemoved;
+
+    for (size_t i = 0; i < obj->u.object.length; ++i) {
+        auto &entry = obj->u.object.values[i];
+        if (pred(entry)) {
+            contentFromRemoved.push_back(EXTR_FN(entry));
+
+            // Free the value for the removed member
+            free_jsonValue(entry.value);
+            continue; // skip adding to new slot
+        }
+
+        // compact in place
+        if (write_i != i) { obj->u.object.values[write_i] = entry; }
+        ++write_i;
+    }
+
+    // Shrink array if we did some removal. It is not an error to remove nothing
+    if (write_i != obj->u.object.length) {
+        obj->u.object.length = write_i;
+        obj->u.object.values =
+            (decltype(obj->u.object.values))std::realloc(obj->u.object.values, write_i * sizeof(*obj->u.object.values));
+    }
+
+    return contentFromRemoved;
+}
+
+// Get methods ... obtain some json_value* in the tree by some logic
 [[maybe_unused]]
 static std::expected<json_value *, err_modifier>
 get_byNames(json_value *root, std::vector<std::string_view> const &toGet) {
@@ -200,6 +277,20 @@ get_byNames(json_value *root, std::vector<std::string_view> const &toGet) {
     }
     return cur;
 }
+
+[[maybe_unused]]
+static std::expected<std::optional<json_value *>, err_modifier>
+getMaybe_byNames(json_value *root, std::vector<std::string_view> const &toGet) {
+    if (root == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+    json_value *cur = root;
+
+    for (auto const &oneName : toGet) {
+        cur = get(*cur, oneName);
+        if (cur == nullptr) { return std::nullopt; }
+    }
+    return cur;
+}
+
 
 [[maybe_unused]]
 static std::expected<std::vector<json_value *>, err_modifier>
@@ -771,7 +862,7 @@ private:
     }
 
     template <typename P>
-    requires std::predicate<P, _json_value>
+    requires std::predicate<P, const _json_value &>
     std::expected<std::unordered_map<std::string, HLPR_glyphByAW>, err_modifier>
     transform_allGlyphsByAW(json_int_t const newWidth, P const pred_keepSameADW) {
         if (not _jsonFont) { return std::unexpected(err_modifier::unexpectedNullptr); }
@@ -1154,13 +1245,13 @@ Modifier::change_unitsPerEm(uint32_t newEmSize) {
     if (not exp_res.has_value()) { return std::unexpected(exp_res.error()); }
     return true;
 }
+
 std::expected<bool, err_modifier>
 Modifier::change_makeMonospaced(uint32_t const targetAdvWidth) {
     auto exp_res = pimpl->transform_allGlyphsByAW(targetAdvWidth, Modifier::Impl::_Detail::default_ksADW);
     if (not exp_res.has_value()) { return std::unexpected(exp_res.error()); }
     return true;
 }
-
 std::expected<bool, err_modifier>
 Modifier::change_makeMonospaced_byEmRatio(double const emRatio) {
     if (emRatio > 2.0) { return std::unexpected(err_modifier::ratioAdvWidthToEmSize_cannotBeOver2); }
