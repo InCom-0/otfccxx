@@ -179,6 +179,39 @@ private:
     std::unique_ptr<Impl> pimpl;
 };
 
+class Modifier_V2 {
+private:
+    class Impl;
+
+public:
+    Modifier_V2() = delete;
+    Modifier_V2(ByteSpan raw_ttfFont, uint32_t ttcindex = 0, Options const &opts = otfccxx::Options(1, true));
+    ~Modifier_V2();
+
+    // Changing dimensions of glyphs
+    std::expected<bool, err_modifier>
+    change_unitsPerEm(uint32_t newEmSize);
+    std::expected<bool, err_modifier>
+    change_makeMonospaced(uint32_t const targetAdvWidth);
+    std::expected<bool, err_modifier>
+    change_makeMonospaced_byEmRatio(double const emRatio);
+
+    // Filtering of font content (ie. deleting parts of the font)
+
+
+    // Modifications of other values and properties
+    std::expected<bool, err_modifier>
+    __remove_ttfHints();
+
+
+    // Export
+    std::expected<Bytes, err_modifier>
+    exportResult(Options const &opts = otfccxx::Options(1));
+
+private:
+    std::unique_ptr<Impl> pimpl;
+};
+
 class Converter {
 public:
     static size_t
