@@ -53,6 +53,8 @@ enum class err_modifier : size_t {
     glyphHasBothCountoursAndReferences,
     ratioAdvWidthToEmSize_cannotBeNegative,
     ratioAdvWidthToEmSize_cannotBeOver2,
+    newEmSize_outsideValidValueRange,
+    otfccHandle_notIndex,
 };
 enum class err_converter : size_t {
     unknownError = 1,
@@ -199,6 +201,8 @@ public:
     change_makeMonospaced_byEmRatio(double const emRatio);
 
     // Filtering of font content (ie. deleting parts of the font)
+    void
+    delete_fontTable(const uint32_t tag);
 
 
     // Modifications of other values and properties

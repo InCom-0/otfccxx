@@ -53,10 +53,6 @@ template <>
 struct _VI_wrap<glyf_Contour> {
     static constexpr auto *interfaceObjPointer = &glyf_iContour;
 };
-template <>
-struct _VI_wrap<const glyf_Contour> {
-    static constexpr auto *interfaceObjPointer = &glyf_iContour;
-};
 
 template <typename T>
 concept has_VI_wrap = requires {

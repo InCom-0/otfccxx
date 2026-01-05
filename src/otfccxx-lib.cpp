@@ -1,12 +1,9 @@
 #include <concepts>
 #include <cstdlib>
-#include <cstring>
 #include <expected>
-#include <fstream>
 #include <limits>
-#include <optional>
 #include <ranges>
-#include <stdint.h>
+#include <fstream>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -907,8 +904,72 @@ private:
     json_value_uptr _jsonFont;
 };
 
+
+Modifier::Modifier(ByteSpan raw_ttfFont, uint32_t ttcindex, Options const &opts)
+    : pimpl(std::make_unique<Impl>(raw_ttfFont, opts, ttcindex)) {}
+
+Modifier::~Modifier() = default;
+
+// Changing dimensions of glyphs
+std::expected<bool, err_modifier>
+Modifier::change_unitsPerEm(uint32_t newEmSize) {
+    auto exp_res = pimpl->transform_allGlyphsSize(newEmSize);
+    if (not exp_res.has_value()) { return std::unexpected(exp_res.error()); }
+    return true;
+}
+
+std::expected<bool, err_modifier>
+Modifier::change_makeMonospaced(uint32_t const targetAdvWidth) {
+    auto exp_res = pimpl->transform_allGlyphsByAW(targetAdvWidth, Modifier::Impl::_Detail::default_ksADW);
+    if (not exp_res.has_value()) { return std::unexpected(exp_res.error()); }
+    return true;
+}
+std::expected<bool, err_modifier>
+Modifier::change_makeMonospaced_byEmRatio(double const emRatio) {
+    if (emRatio > 2.0) { return std::unexpected(err_modifier::ratioAdvWidthToEmSize_cannotBeOver2); }
+    if (emRatio < 0.0) { return std::unexpected(err_modifier::ratioAdvWidthToEmSize_cannotBeNegative); }
+
+    if (pimpl->_jsonFont == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+
+    if (auto const emsz = json_ext::getMaybe_byNamesInTree(pimpl->_jsonFont.get(), {{"head"sv}, {"unitsPerEm"sv}});
+        not emsz.has_value()) {
+        return std::unexpected(err_modifier::unexpectedNullptr);
+    }
+    else if (not emsz.value().front().has_value()) { return std::unexpected(err_modifier::missingJSONKey); }
+    else if (emsz.value().front().value()->type != json_type::json_integer) {
+        return std::unexpected(err_modifier::unexpectedJSONValueType);
+    }
+    else { return change_makeMonospaced(static_cast<uint32_t>(emsz.value().front().value()->u.integer * emRatio)); }
+
+    std::unreachable();
+}
+
+// Filtering of font content (ie. deleting parts of the font)
+
+
+// Modifications of other values and properties
+
+// THIS FUNCTION IS FAKE
+std::expected<bool, err_modifier>
+Modifier::__remove_ttfHints() {
+    auto r = json_ext::remove_objectMemberByName(pimpl->_jsonFont.get(), ""sv);
+    if (r.has_value()) { return true; }
+    return false;
+}
+
+// Export
+std::expected<Bytes, err_modifier>
+Modifier::exportResult(Options const &opts) {
+    if (! pimpl) { return std::unexpected(err_modifier::unexpectedNullptr); }
+    else { return pimpl->exportResult(opts); }
+}
+
+// #####################################################################
+// ### Modifier_V2 implementation ###
+// #####################################################################
+
 class Modifier_V2::Impl {
-    friend class Modifier;
+    friend class Modifier_V2;
 
 public:
     Impl() = delete;
@@ -937,14 +998,13 @@ public:
 
 private:
     struct HLPR_glyphByAW {
-        json_int_t origLSB  = 0;
-        json_int_t movedByH = 0;
+        int32_t origLSB  = 0;
+        int32_t movedByH = 0;
     };
 
     struct _Detail {
-        static constexpr auto default_ksADW = [](const _json_value &glyphObj) -> bool {
-            auto adwObj = json_ext::get(glyphObj, "advanceWidth"sv);
-            if (adwObj->u.integer == 0) { return true; }
+        static constexpr auto default_ksADW = [](const glyf_Glyph &glyph) -> bool {
+            if (glyph.advanceWidth.kernel == 0) { return true; }
             return false;
         };
     };
@@ -972,62 +1032,51 @@ private:
     std::expected<size_t, err_modifier>
     transform_allGlyphsSize(uint32_t newEmSize) {
         if (not _font) { return std::unexpected(err_modifier::unexpectedNullptr); }
-        auto ht_ptr = json_ext::get(*_font, "head"sv);
-        if (ht_ptr == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
-        if (ht_ptr->type != json_type::json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
+        if (not _font->head) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        if (not _font->glyf) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        if (newEmSize < 0) { return std::unexpected(err_modifier::newEmSize_outsideValidValueRange); }
 
-        auto upem = json_ext::get(*ht_ptr, "unitsPerEm"sv);
-        if (upem == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
-        if (upem->type != json_type::json_integer) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
+        double const a = (static_cast<double>(newEmSize) / _font->head->unitsPerEm), b = 0, c = 0, d = a, dx = 0,
+                     dy         = 0;
+        _font->head->unitsPerEm = newEmSize;
 
-        double const a = (static_cast<double>(newEmSize) / upem->u.integer), b = 0, c = 0, d = a, dx = 0, dy = 0;
-        upem->u.integer = newEmSize;
-
-        auto gt_ptr = json_ext::get(*_font, "glyf"sv);
-        if (gt_ptr == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
-        if (gt_ptr->type != json_type::json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
-        auto const &glyfs = *gt_ptr;
-
-        size_t res = 0uz;
-        for (auto const &one_oe_glyph : glyfs.u.object) {
-            if (one_oe_glyph.value == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
-            if (one_oe_glyph.value->type != json_type::json_object) {
-                return std::unexpected(err_modifier::unexpectedJSONValueType);
-            }
-
-            if (auto oneTransformRes = transform_glyphSize(*one_oe_glyph.value, a, b, c, d, dx, dy);
+        auto   glyfVec = wrappers::CV_wrapper<table_glyf, glyf_GlyphPtr>(*_font->glyf);
+        size_t res     = 0uz;
+        for (auto one_oe_glyph : glyfVec) {
+            if (auto oneTransformRes = transform_glyphSize(one_oe_glyph, a, b, c, d, dx, dy);
                 not oneTransformRes.has_value()) {
                 return std::unexpected(oneTransformRes.error());
             }
             else { res += oneTransformRes.value(); }
         }
 
-        if (auto res = _pureScale_AscDescLG(a); not res.has_value()) { return std::unexpected(res.error()); }
+        if (auto res_loc = _pureScale_AscDescLG(a); not res_loc.has_value()) {
+            return std::unexpected(res_loc.error());
+        }
         return res;
     }
 
     template <typename P>
-    requires std::predicate<P, const _json_value &>
-    std::expected<std::unordered_map<std::string, HLPR_glyphByAW>, err_modifier>
-    transform_allGlyphsByAW(json_int_t const newWidth, P const pred_keepSameADW) {
+    requires std::predicate<P, const glyf_Glyph &>
+    std::expected<std::unordered_map<glyphid_t, HLPR_glyphByAW>, err_modifier>
+    transform_allGlyphsByAW(int32_t const newWidth, P const pred_keepSameADW) {
+
         if (not _font) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        if (not _font->head) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        if (not _font->glyf) { return std::unexpected(err_modifier::unexpectedNullptr); }
 
-        std::unordered_map<std::string, HLPR_glyphByAW> res{};
-        std::unordered_set<std::string>                 cycleChecker{};
+        std::unordered_map<glyphid_t, HLPR_glyphByAW> res{};
+        std::unordered_set<glyphid_t>                 cycleChecker{};
+        std::unordered_map<glyphid_t, glyf_GlyphPtr>  mapOfRefs{};
 
-        auto gt_ptr = json_ext::get(*_font, "glyf"sv);
-        if (gt_ptr == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
-        if (gt_ptr->type != json_type::json_object) { return std::unexpected(err_modifier::unexpectedJSONValueType); }
-        auto const &glyfs = *gt_ptr;
+        auto glyfVec = wrappers::CV_wrapper<table_glyf, glyf_GlyphPtr>(*_font->glyf);
+        for (size_t id = 0; auto glyf : glyfVec) { mapOfRefs.emplace(id, glyf); }
 
-        std::unordered_map<std::string, struct _json_value *> mapOfRefs;
-        for (auto const &glyf : glyfs.u.object) {
-            mapOfRefs.insert({std::string(glyf.name, glyf.name_length), glyf.value});
-        }
-
-        auto recSolver = [&](this auto const   &self,
-                             std::string const &toSolve) -> std::expected<HLPR_glyphByAW, err_modifier> {
+        auto recSolver = [&](this auto const &self,
+                             glyphid_t const  toSolve) -> std::expected<HLPR_glyphByAW, err_modifier> {
             if (cycleChecker.contains(toSolve)) { return std::unexpected(err_modifier::cyclicGlyfReferencesFound); }
+
+            // If it has been solved already, we just return the result stored in res
             if (auto found = res.find(toSolve); found != res.end()) { return found->second; }
 
             // Get the object we are supposed to be solving
@@ -1036,22 +1085,18 @@ private:
             auto solveObj = ite->second;
             if (solveObj == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
 
-            // Get advanceWidth (that must be there)
-            auto adwObj = json_ext::get(*solveObj, "advanceWidth"sv);
-            if (adwObj == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
-            if (adwObj->type != json_type::json_integer) {
-                return std::unexpected(err_modifier::unexpectedJSONValueType);
-            }
-            bool keepSameADW = pred_keepSameADW(*solveObj);
+            // Get advanceWidth
+            auto &adwCur      = solveObj->advanceWidth.kernel;
+            bool  keepSameADW = pred_keepSameADW(*solveObj);
 
             // Prep common fields
-            json_int_t leftBearing  = std::numeric_limits<json_int_t>::max();
-            json_int_t rightBearing = std::numeric_limits<json_int_t>::min();
-            json_int_t moveBy       = 0;
+            int32_t leftBearing  = std::numeric_limits<int32_t>::max();
+            int32_t rightBearing = std::numeric_limits<int32_t>::min();
+            int32_t moveBy       = 0;
 
-            auto const compute_moveBy = [&]() -> json_int_t {
-                double ratio =
-                    (leftBearing - (adwObj->u.integer / 2.0)) / (rightBearing - ((adwObj->u.integer | 1) / 2.0));
+            auto const compute_moveBy = [&]() -> int32_t {
+                double ratio = (leftBearing - (static_cast<int32_t>(adwCur) / 2.0)) /
+                               (rightBearing - ((static_cast<int32_t>(adwCur) | 1) / 2.0));
                 ratio += (ratio == 1.0) * std::numeric_limits<double>::min();
 
                 double const LN = leftBearing - (newWidth / 2.0);
@@ -1061,99 +1106,62 @@ private:
             };
 
             // Get the contours (if N/A then skip)
-            auto contoursObj = json_ext::get(*solveObj, "contours"sv);
-            if (contoursObj != nullptr) {
-                if (contoursObj->type != json_type::json_array) {
-                    return std::unexpected(err_modifier::unexpectedJSONValueType);
-                }
-                for (auto countr : contoursObj->u.array) {
-                    if (countr->type != json_type::json_array) {
-                        return std::unexpected(err_modifier::unexpectedJSONValueType);
-                    }
-                    for (auto cp : countr->u.array) {
-                        if (cp->type != json_type::json_object) {
-                            return std::unexpected(err_modifier::unexpectedJSONValueType);
-                        }
-                        auto cp_xPos = json_ext::get(*cp, "x"sv);
-                        if (cp_xPos->type != json_type::json_integer) {
-                            return std::unexpected(err_modifier::unexpectedJSONValueType);
-                        }
+            auto countoursObj = wrappers::CV_wrapper<glyf_ContourList, glyf_Contour>(solveObj->contours);
+            if (not countoursObj.empty()) {
+                for (auto &countr : countoursObj) {
+
+                    auto oneCont = wrappers::CV_wrapper<glyf_Contour, glyf_Point>(countr);
+                    for (auto &cp : oneCont) {
+
+                        auto cp_xPos = cp.x;
                         // Update left and right bearings
-                        leftBearing  = std::min(leftBearing, cp_xPos->u.integer);
-                        rightBearing = std::max(rightBearing, cp_xPos->u.integer);
+                        leftBearing  = std::min(leftBearing, static_cast<int32_t>(cp_xPos.kernel));
+                        rightBearing = std::max(rightBearing, static_cast<int32_t>(cp_xPos.kernel));
                     }
                 }
 
                 if (keepSameADW) { moveBy = 0; }
-                else {
-                    moveBy = compute_moveBy();
+                else { moveBy = compute_moveBy(); }
 
-                    // Old and impefect
-                    // moveBy = (newWidth - adwObj->u.integer) *
-                    //          (static_cast<double>(leftBearing) / (leftBearing + (adwObj->u.integer - rightBearing)));
-                }
-
-                for (auto const oneCont : contoursObj->u.array) {
-                    for (auto const oneContPoint : oneCont->u.array) {
-                        auto refXpos        = json_ext::get(*oneContPoint, "x"sv);
+                for (auto &countr : countoursObj) {
+                    auto oneCont = wrappers::CV_wrapper<glyf_Contour, glyf_Point>(countr);
+                    for (auto &oneContPoint : oneCont) {
                         // Move the countour points by moveBy
-                        refXpos->u.integer += moveBy;
+                        oneContPoint.x.kernel += moveBy;
                     }
                 }
             }
 
             // Get the references (if N/A then skip)
-            auto refesObj = json_ext::get(*solveObj, "references"sv);
-            if (refesObj != nullptr) {
-                if (contoursObj != nullptr) {
-                    { return std::unexpected(err_modifier::glyphHasBothCountoursAndReferences); }
-                }
-                if (refesObj->type != json_type::json_array) {
-                    return std::unexpected(err_modifier::unexpectedJSONValueType);
-                }
+            auto refesObj = wrappers::CV_wrapper<glyf_ReferenceList, glyf_ComponentReference>(solveObj->references);
+            if (not refesObj.empty()) {
 
                 cycleChecker.insert(toSolve);
                 std::vector<HLPR_glyphByAW> glyphHLPRs;
 
-                for (auto const oneRef : refesObj->u.array) {
-                    if (oneRef->type != json_type::json_object) {
-                        return std::unexpected(err_modifier::unexpectedJSONValueType);
-                    }
-
-                    auto refName = json_ext::get(*oneRef, "glyph"sv);
-                    if (refName == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
-                    if (refName->type != json_type::json_string) {
-                        return std::unexpected(err_modifier::unexpectedJSONValueType);
-                    }
-                    auto refXpos = json_ext::get(*oneRef, "x"sv);
-                    if (refXpos == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
-                    if (refXpos->type != json_type::json_integer) {
-                        return std::unexpected(err_modifier::unexpectedJSONValueType);
+                for (auto const &oneRef : refesObj) {
+                    if (oneRef.glyph.state != handle_state::HANDLE_STATE_INDEX) {
+                        return std::unexpected(err_modifier::otfccHandle_notIndex);
                     }
 
                     // Recursive call
-                    auto refGlyphHLPR = self(std::string(refName->u.string.ptr, refName->u.string.length));
+                    auto refGlyphHLPR = self(oneRef.glyph.index);
                     if (not refGlyphHLPR.has_value()) { return std::unexpected(refGlyphHLPR.error()); }
 
                     glyphHLPRs.push_back(refGlyphHLPR.value());
-                    leftBearing  = std::min(leftBearing, refGlyphHLPR.value().origLSB + refXpos->u.integer);
-                    rightBearing = std::max(rightBearing, refGlyphHLPR.value().origLSB + refXpos->u.integer);
+                    leftBearing =
+                        std::min(leftBearing, refGlyphHLPR.value().origLSB + static_cast<int32_t>(oneRef.x.kernel));
+                    rightBearing =
+                        std::max(rightBearing, refGlyphHLPR.value().origLSB + static_cast<int32_t>(oneRef.x.kernel));
                 }
 
                 if (keepSameADW) { moveBy = 0; }
-                else {
-                    moveBy = compute_moveBy();
+                else { moveBy = compute_moveBy(); }
 
-                    // Old and impefect
-                    // moveBy = (newWidth - adwObj->u.integer) *
-                    //          (static_cast<double>(leftBearing) / (leftBearing + (adwObj->u.integer - rightBearing)));
-                }
-
-                for (size_t i = 0; auto const oneRef : refesObj->u.array) {
-                    auto refXpos        = json_ext::get(*oneRef, "x"sv);
+                for (size_t i = 0; auto &oneRef : refesObj) {
                     // Move the anchors for references by moveBy but exclude the move already done inside the refed
                     // glyph
-                    refXpos->u.integer += (moveBy - glyphHLPRs.at(i).movedByH);
+                    oneRef.x.kernel += (moveBy - glyphHLPRs.at(i).movedByH);
                     i++;
                 }
 
@@ -1161,7 +1169,7 @@ private:
             }
 
             // Update the actual advance width value in the glyph
-            if (not keepSameADW) { adwObj->u.integer = newWidth; }
+            if (not keepSameADW) { adwCur = newWidth; }
 
             // Update res;
             if (auto inserted = res.insert({toSolve, {leftBearing, moveBy}}); inserted.second == false) {
@@ -1183,8 +1191,10 @@ private:
 
     // Other modifications
     std::expected<bool, err_modifier>
-    remove_tableByName(std::string_view sv) {
-        return json_ext::remove_objectMemberByName(_font.get(), sv);
+    remove_tableByTag(const uint32_t tag) {
+        if (not _font) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        otfcc_iFont.deleteTable(_font.get(), tag);
+        return true;
     }
 
 
@@ -1303,43 +1313,34 @@ private:
 };
 
 
-Modifier::Modifier(ByteSpan raw_ttfFont, uint32_t ttcindex, Options const &opts)
+Modifier_V2::Modifier_V2(ByteSpan raw_ttfFont, uint32_t ttcindex, Options const &opts)
     : pimpl(std::make_unique<Impl>(raw_ttfFont, opts, ttcindex)) {}
 
-Modifier::~Modifier() = default;
+Modifier_V2::~Modifier_V2() = default;
 
 // Changing dimensions of glyphs
 std::expected<bool, err_modifier>
-Modifier::change_unitsPerEm(uint32_t newEmSize) {
+Modifier_V2::change_unitsPerEm(uint32_t newEmSize) {
     auto exp_res = pimpl->transform_allGlyphsSize(newEmSize);
     if (not exp_res.has_value()) { return std::unexpected(exp_res.error()); }
     return true;
 }
 
 std::expected<bool, err_modifier>
-Modifier::change_makeMonospaced(uint32_t const targetAdvWidth) {
-    auto exp_res = pimpl->transform_allGlyphsByAW(targetAdvWidth, Modifier::Impl::_Detail::default_ksADW);
+Modifier_V2::change_makeMonospaced(uint32_t const targetAdvWidth) {
+    auto exp_res = pimpl->transform_allGlyphsByAW(targetAdvWidth, Modifier_V2::Impl::_Detail::default_ksADW);
     if (not exp_res.has_value()) { return std::unexpected(exp_res.error()); }
     return true;
 }
 std::expected<bool, err_modifier>
-Modifier::change_makeMonospaced_byEmRatio(double const emRatio) {
+Modifier_V2::change_makeMonospaced_byEmRatio(double const emRatio) {
     if (emRatio > 2.0) { return std::unexpected(err_modifier::ratioAdvWidthToEmSize_cannotBeOver2); }
     if (emRatio < 0.0) { return std::unexpected(err_modifier::ratioAdvWidthToEmSize_cannotBeNegative); }
 
-    if (pimpl->_jsonFont == nullptr) { return std::unexpected(err_modifier::unexpectedNullptr); }
+    if (not pimpl->_font) { return std::unexpected(err_modifier::unexpectedNullptr); }
+    if (not pimpl->_font->head) { return std::unexpected(err_modifier::unexpectedNullptr); }
 
-    if (auto const emsz = json_ext::getMaybe_byNamesInTree(pimpl->_jsonFont.get(), {{"head"sv}, {"unitsPerEm"sv}});
-        not emsz.has_value()) {
-        return std::unexpected(err_modifier::unexpectedNullptr);
-    }
-    else if (not emsz.value().front().has_value()) { return std::unexpected(err_modifier::missingJSONKey); }
-    else if (emsz.value().front().value()->type != json_type::json_integer) {
-        return std::unexpected(err_modifier::unexpectedJSONValueType);
-    }
-    else { return change_makeMonospaced(static_cast<uint32_t>(emsz.value().front().value()->u.integer * emRatio)); }
-
-    std::unreachable();
+    return change_makeMonospaced(static_cast<uint32_t>(pimpl->_font->head->unitsPerEm * emRatio));
 }
 
 // Filtering of font content (ie. deleting parts of the font)
@@ -1349,15 +1350,13 @@ Modifier::change_makeMonospaced_byEmRatio(double const emRatio) {
 
 // THIS FUNCTION IS FAKE
 std::expected<bool, err_modifier>
-Modifier::__remove_ttfHints() {
-    auto r = json_ext::remove_objectMemberByName(pimpl->_jsonFont.get(), ""sv);
-    if (r.has_value()) { return true; }
+Modifier_V2::__remove_ttfHints() {
     return false;
 }
 
 // Export
 std::expected<Bytes, err_modifier>
-Modifier::exportResult(Options const &opts) {
+Modifier_V2::exportResult(Options const &opts) {
     if (! pimpl) { return std::unexpected(err_modifier::unexpectedNullptr); }
     else { return pimpl->exportResult(opts); }
 }
