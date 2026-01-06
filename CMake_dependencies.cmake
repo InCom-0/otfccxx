@@ -1,11 +1,13 @@
 include(cmake/CPM.cmake)
-set(CPM_USE_LOCAL_PACKAGES_ORIG ${CPM_USE_LOCAL_PACKAGES})
-set(CPM_USE_LOCAL_PACKAGES ON)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 
+set(HB_BUILD_UTILS OFF)
+CPMAddPackage("gh:InCom-0/harfbuzz#symbolDedup")
 CPMAddPackage("gh:InCom-0/fmem#master")
 CPMAddPackage("gh:InCom-0/otfcc-lib_cmake#master")
 
-set(HB_BUILD_UTILS OFF)
+# set(CPM_USE_LOCAL_PACKAGES ON)
+
 # CPMAddPackage(
 #   NAME     harfbuzz
 #   URL      https://github.com/harfbuzz/harfbuzz/releases/download/12.2.0/harfbuzz-12.2.0.tar.xz
@@ -13,11 +15,8 @@ set(HB_BUILD_UTILS OFF)
 #   EXCLUDE_FROM_ALL TRUE
 # )
 
-set(CPM_USE_LOCAL_PACKAGES OFF)
-CPMAddPackage("gh:InCom-0/harfbuzz#symbolDedup")
 CPMAddPackage(
     URI "gh:InCom-0/woff2#otfccxx"
     OPTIONS "NOISY_LOGGING OFF"
+    FIND_PACKAGE_ARGUMENTS NAME WOFF2
 )
-
-set(CPM_USE_LOCAL_PACKAGES ${CPM_USE_LOCAL_PACKAGES_ORIG})

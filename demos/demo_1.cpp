@@ -4,15 +4,14 @@
 #include <iostream>
 
 #include <otfccxx-lib/otfccxx-lib.hpp>
-#include <woff2/encode.h>
 
 int
 main(int argc, char *argv[]) {
 
-    std::vector<uint32_t> keepThese{65, 75, 85, 97, 113, 117, 99, 105, 107, 84, 102, 108};
+    std::vector<uint32_t> keepThese{65, 75, 85, 97, 113, 117, 99, 105, 107, 84, 102, 108,10495};
 
     otfccxx::Subsetter subsetter_1;
-    subsetter_1.add_toKeep_CPs(keepThese).add_ff_toSubset(std::filesystem::path("./JetBrainsMonoNerdFont-Regular.ttf"));
+    subsetter_1.add_toKeep_CPs(keepThese).add_ff_toSubset(std::filesystem::path("./IosevkaNerdFont-Regular.ttf"));
     auto vecOfResFonts = subsetter_1.execute();
 
     for (auto &oneSubsFont : vecOfResFonts.value()) {
@@ -27,8 +26,10 @@ main(int argc, char *argv[]) {
         oneSubsFont = std::move(res.value());
     }
 
+    auto wf2 = otfccxx::Converter::encode_Woff2(vecOfResFonts->front());
 
-    std::filesystem::path outFile = "./jb_8.ttf";
+
+    std::filesystem::path outFile = "./iosev_2.ttf";
     std::ofstream         out2(outFile, std::ios::binary);
 
     if (not otfccxx::write_bytesToFile(outFile, vecOfResFonts->front()).has_value()) { std::exit(1); }

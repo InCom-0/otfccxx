@@ -2,7 +2,6 @@
 #include <cstdlib>
 #include <expected>
 #include <fstream>
-#include <limits>
 #include <ranges>
 #include <unordered_map>
 #include <unordered_set>
@@ -17,6 +16,7 @@
 
 #include <otfccxx-lib_private/fmem_file.hpp>
 #include <otfccxx-lib_private/json_ext.hpp>
+#include <otfccxx-lib_private/machinery_stderr_capt.hpp>
 #include <otfccxx-lib_private/otfcc_enum.hpp>
 #include <otfccxx-lib_private/otfcc_iVector.hpp>
 
@@ -529,7 +529,7 @@ private:
 
         auto glyfVec = wrappers::CV_wrapper<table_glyf, glyf_GlyphPtr>(*_font->glyf);
 
-        for (size_t id = 0; auto glyf : glyfVec) { mapOfRefs.emplace(id++, glyf); }
+        for (glyphid_t id = 0; auto glyf : glyfVec) { mapOfRefs.emplace(id++, glyf); }
 
         auto recSolver = [&](this auto const &self, glyphid_t const toSolve) -> std::expected<int32_t, err_modifier> {
             if (cycleChecker.contains(toSolve)) { return std::unexpected(err_modifier::cyclicGlyfReferencesFound); }
@@ -825,9 +825,17 @@ Converter::encode_Woff2(ByteSpan ttf) {
     size_t max_size = max_compressed_size(ttf);
     Bytes  output(max_size);
 
+    // Redirects and captures stderr
+    detail::_stderrCapture err_cap;
+
     size_t actual_size = max_size;
     bool   ok          = woff2::ConvertTTFToWOFF2(reinterpret_cast<const uint8_t *>(ttf.data()), ttf.size(),
                                                   reinterpret_cast<uint8_t *>(output.data()), &actual_size);
+
+    // Restore (automatic), we don't need the messages
+    // err_cap.restore();
+
+    err_cap.restore();
     if (! ok) { return std::unexpected(err_converter::unknownError); }
 
     output.resize(actual_size);
@@ -836,6 +844,9 @@ Converter::encode_Woff2(ByteSpan ttf) {
 
 std::expected<Bytes, err_converter>
 Converter::decode_Woff2(ByteSpan ttf) {
+    // Redirects and captures stderr
+    detail::_stderrCapture err_cap;
+
     const size_t final_size = woff2::ComputeWOFF2FinalSize(reinterpret_cast<const uint8_t *>(ttf.data()), ttf.size());
     if (final_size == 0) { return std::unexpected(err_converter::woff2_dataInvalid); }
 
@@ -843,6 +854,9 @@ Converter::decode_Woff2(ByteSpan ttf) {
     woff2::WOFF2MemoryOut out(reinterpret_cast<uint8_t *>(output.data()), output.size());
 
     const bool ok = ConvertWOFF2ToTTF(reinterpret_cast<const uint8_t *>(ttf.data()), ttf.size(), &out);
+
+    // Restore (automatic), we don't need the messages
+    err_cap.restore();
     if (! ok) { return std::unexpected(err_converter::woff2_decompressionFailed); }
 
     output.resize(out.Size());
