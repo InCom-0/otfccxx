@@ -1,5 +1,7 @@
 include(cmake/CPM.cmake)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
+# set (CPM_USE_LOCAL_PACKAGES ON)
 
 set(HB_BUILD_UTILS OFF)
 CPMAddPackage("gh:InCom-0/harfbuzz#symbolDedup")

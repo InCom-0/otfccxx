@@ -399,7 +399,16 @@ Subsetter::execute_bestEffort() {
 
 RET:
     std::vector<uint32_t> resVec;
-    for (auto const &item : *pimpl->toKeep_unicodeCPs.get()) { resVec.push_back(item); }
+
+    {
+        auto curCP = std::make_unique<hb_codepoint_t>(HB_SET_VALUE_INVALID);
+
+        auto rf = pimpl->toKeep_unicodeCPs.get();
+
+        while (hb_set_next(pimpl->toKeep_unicodeCPs.get(), curCP.get())) {
+            resVec.push_back(*curCP);
+        }
+    }
 
     return std::make_pair(
         std::vector<Bytes>(std::from_range, res | std::views::transform([](auto const &item) {

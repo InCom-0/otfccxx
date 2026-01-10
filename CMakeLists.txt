@@ -6,9 +6,13 @@ project(otfccxx-lib
   DESCRIPTION
   "Library for programmatic modifications of OpenType fonts. Focused on font subsetting and modifications of glyph sizes and advance width."
   LANGUAGES CXX C)
-set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
-set(BUILD_SHARED_LIBS OFF)
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+option(BUILD_SHARED_LIBS "Build shared libraries" ON)
+
+option(OTFCCXX-LIB_BUILD_DEMOS "Build demos of otfccxx-lib" ${PROJECT_IS_TOP_LEVEL})
+# set(BUILD_SHARED_LIBS OFF)
+
 
 #####################################################################
 ### Platform specific hacks ###
@@ -17,6 +21,7 @@ if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT MATCHES "MSVC")
   add_compile_options(/utf-8)
   add_compile_definitions(NOMINMAX)
 endif()
+
 
 ########################################################
 ### Target specification ###
@@ -41,15 +46,18 @@ target_compile_features(otfccxx-lib PRIVATE cxx_std_23)
 
 include(CMake_dependencies.cmake) ### Loads and declares the required external libraries using CPM or CMake's FetchContent.
 
-target_link_libraries(otfccxx-lib PRIVATE otfcc-lib::otfcc-lib harfbuzz-subset fmem::fmem woff2enc woff2dec)
+target_link_libraries(otfccxx-lib PRIVATE otfcc_lib::otfcc_lib harfbuzz-subset harfbuzz fmem::fmem woff2enc woff2dec)
 
-### This attempts to compile sample program to find out if we are using libc++(USING_LIBCXX) or libstdc++(USING_LIBSTDCXX)
-# include(cmake/stdlibQuery.cmake)
-# if(USING_LIBSTDCXX)
-#   target_link_libraries(otfccxx-lib PRIVATE "-lstdc++exp")
-# endif()
+set_target_properties(otfccxx-lib PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
 
 
-add_executable(scratch demos/demo_1.cpp)
-target_compile_features(scratch PRIVATE cxx_std_23)
-target_link_libraries(scratch PRIVATE otfccxx-lib)
+########################################################
+### Demos specification ###
+########################################################
+if(OTFCCXX-LIB_BUILD_DEMOS)
+  add_executable(scratch demos/demo_1.cpp)
+  target_compile_features(scratch PRIVATE cxx_std_23)
+  target_link_libraries(scratch PRIVATE otfccxx-lib)
+endif()
+
+
