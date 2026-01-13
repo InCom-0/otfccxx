@@ -20,7 +20,7 @@ CPMAddPackage(
 )
 CPMAddPackage(
   URI "gh:InCom-0/fmem#master"
-  OPTIONS "FMEM_STATIC ON"
+  OPTIONS "FMEM_STATIC ON" "ALLOW_OPENMEMSTREAM OFF"
 )
 CPMAddPackage(
   URI "gh:InCom-0/woff2#otfccxx"
