@@ -58,19 +58,18 @@ target_sources(otfccxx-lib
   BASE_DIRS
   src/private_inc)
 
+target_link_libraries(otfccxx-lib PRIVATE harfbuzz-subset harfbuzz woff2enc woff2dec otfcc_lib::otfcc_lib fmem::fmem)
+
 target_compile_features(otfccxx-lib PRIVATE cxx_std_23)
-
-# target_link_libraries(otfccxx-lib PRIVATE harfbuzz-subset harfbuzz woff2enc woff2dec)
-target_link_libraries(otfccxx-lib PRIVATE
-  $<BUILD_INTERFACE:harfbuzz-subset>
-  $<BUILD_INTERFACE:harfbuzz>
-  $<BUILD_INTERFACE:woff2enc>
-  $<BUILD_INTERFACE:woff2dec>
-  $<BUILD_INTERFACE:otfcc_lib::otfcc_lib>
-  $<BUILD_INTERFACE:fmem::fmem>
-)
-
 set_target_properties(otfccxx-lib PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
+
+target_compile_definitions(otfccxx-lib PRIVATE OTFCCXX_LIB_EXPORTS)
+if(NOT WIN32)
+  set_target_properties(otfccxx-lib PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+  )
+endif()
 
 
 ########################################################

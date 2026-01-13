@@ -10,6 +10,16 @@
 #include <vector>
 
 
+#if defined(_WIN32)
+#if defined(OTFCCXX_LIB_EXPORTS)
+#define OTFCCXX_API __declspec(dllexport)
+#else
+#define OTFCCXX_API __declspec(dllimport)
+#endif
+#else
+#define OTFCCXX_API __attribute__((visibility("default")))
+#endif
+
 namespace otfccxx {
 
 // #####################################################################
@@ -73,8 +83,8 @@ enum class err_converter : size_t {
     woff2_decompressionFailed
 };
 
-std::expected<bool, std::filesystem::file_type>
-write_bytesToFile(std::filesystem::path const &p, ByteSpan bytes);
+OTFCCXX_API std::expected<bool, std::filesystem::file_type>
+            write_bytesToFile(std::filesystem::path const &p, ByteSpan bytes);
 
 
 // #####################################################################
@@ -82,7 +92,7 @@ write_bytesToFile(std::filesystem::path const &p, ByteSpan bytes);
 // #####################################################################
 
 // Simply wraps otfcc_Options
-class Options {
+class OTFCCXX_API Options {
 private:
 public:
     explicit Options() noexcept;
@@ -103,7 +113,7 @@ private:
 
 // 'Waterfall' subsetter that subsets a collection of fonts in a priority waterfall fashion based on the requested
 // unicode codepoints. Has 'builder pattern' - like interface.
-class Subsetter {
+class OTFCCXX_API Subsetter {
 public:
     Subsetter();                      // defined in the implementation file
 
@@ -161,7 +171,7 @@ private:
 
 // Provides high-level modification capability for TTF fonts. The functionality is very limited in scope.
 // TTF hints are always removed from the font
-class Modifier {
+class OTFCCXX_API Modifier {
 public:
     Modifier() = delete;
     Modifier(ByteSpan raw_ttfFont, uint32_t ttcindex = 0, Options const &opts = otfccxx::Options(1, true));
@@ -195,7 +205,7 @@ private:
 };
 
 
-class Converter {
+class OTFCCXX_API Converter {
 public:
     static size_t
     max_compressed_size(ByteSpan data);
