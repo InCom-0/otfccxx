@@ -2,9 +2,9 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
   set(CMAKE_SYSTEM_PROCESSOR arm64)
 endif()
 
-set(CPACK_PACKAGE_NAME "otfccxx-lib")
+set(CPACK_PACKAGE_NAME "otfccxx")
 set(CPACK_PACKAGE_VENDOR "incom")
-set(CPACK_PACKAGE_FILE_NAME "otfccxx-lib")
+set(CPACK_PACKAGE_FILE_NAME "otfccxx")
 set(CPACK_PACKAGE_DIRECTORY ${PROJECT_BINARY_DIR})
 
 # From the GitHub About section
@@ -28,31 +28,31 @@ set(CPACK_RESOURCE_FILE_README ${PROJECT_SOURCE_DIR}/README.md)
 
 if(MINGW)
   if(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "AMD64")
-    set(CPACK_PACKAGE_FILE_NAME "otfccxx-lib_windows_gnu_x86_64")
+    set(CPACK_PACKAGE_FILE_NAME "otfccxx_windows_gnu_x86_64")
   endif()
   if(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "ARM64")
-    set(CPACK_PACKAGE_FILE_NAME "otfccxx-lib_windows_gnu_arm64")
+    set(CPACK_PACKAGE_FILE_NAME "otfccxx_windows_gnu_arm64")
   endif()
 
   set(CPACK_GENERATOR ZIP)
 elseif(MSVC)
   if(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "AMD64")
-    set(CPACK_PACKAGE_FILE_NAME "otfccxx-lib_windows_msvc_x86_64")
+    set(CPACK_PACKAGE_FILE_NAME "otfccxx_windows_msvc_x86_64")
   endif()
   if(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "ARM64")
-    set(CPACK_PACKAGE_FILE_NAME "otfccxx-lib_windows_msvc_arm64")
+    set(CPACK_PACKAGE_FILE_NAME "otfccxx_windows_msvc_arm64")
   endif()
   set(CPACK_GENERATOR ZIP)
 
 
 elseif(APPLE)
-  set(CPACK_PACKAGE_FILE_NAME "otfccxx-lib_macos_${CMAKE_SYSTEM_PROCESSOR}")
+  set(CPACK_PACKAGE_FILE_NAME "otfccxx_macos_${CMAKE_SYSTEM_PROCESSOR}")
   set(CPACK_GENERATOR TGZ)
   # set(CPACK_PACKAGE_ICON ${CMAKE_CURRENT_LIST_DIR}/neovim.icns)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  set(CPACK_PACKAGE_FILE_NAME "otfccxx-lib_linux_${CMAKE_SYSTEM_PROCESSOR}")
+  set(CPACK_PACKAGE_FILE_NAME "otfccxx_linux_${CMAKE_SYSTEM_PROCESSOR}")
   set(CPACK_GENERATOR TGZ)
-  set(CPACK_DEBIAN_PACKAGE_NAME "otfccxx-lib") # required
+  set(CPACK_DEBIAN_PACKAGE_NAME "otfccxx") # required
   set(CPACK_DEBIAN_PACKAGE_MAINTAINER "incom") # required
 
 else()

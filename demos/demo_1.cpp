@@ -3,7 +3,7 @@
 #include <fstream>
 #include <iostream>
 
-#include <otfccxx-lib/otfccxx-lib.hpp>
+#include <otfccxx/otfccxx.hpp>
 
 int
 main(int argc, char *argv[]) {

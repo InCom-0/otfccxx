@@ -5,8 +5,8 @@
 #include <type_traits>
 
 
-#include <otfccxx-lib/otfccxx-lib.hpp>
-#include <otfccxx-lib_private/otfcc_iElement.hpp>
+#include <otfccxx/otfccxx.hpp>
+#include <otfccxx_private/otfcc_iElement.hpp>
 
 #include <otfcc/otfcc_api.h>
 

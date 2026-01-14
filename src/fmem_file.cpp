@@ -1,7 +1,7 @@
 #include <cstring>
 #include <stdexcept>
 
-#include <otfccxx-lib_private/fmem_file.hpp>
+#include <otfccxx_private/fmem_file.hpp>
 
 namespace otfccxx {
 fmem_file::fmem_file() : mem_(new fmem{}) {

@@ -4,7 +4,7 @@
 #include <concepts>
 
 
-#include <otfccxx-lib/otfccxx-lib.hpp>
+#include <otfccxx/otfccxx.hpp>
 
 #include <otfcc/otfcc_api.h>
 

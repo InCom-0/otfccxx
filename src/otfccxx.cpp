@@ -12,13 +12,13 @@
 #include <woff2/encode.h>
 #include <woff2/output.h>
 
-#include <otfccxx-lib/otfccxx-lib.hpp>
+#include <otfccxx/otfccxx.hpp>
 
-#include <otfccxx-lib_private/fmem_file.hpp>
-#include <otfccxx-lib_private/json_ext.hpp>
-#include <otfccxx-lib_private/machinery_stderr_capt.hpp>
-#include <otfccxx-lib_private/otfcc_enum.hpp>
-#include <otfccxx-lib_private/otfcc_iVector.hpp>
+#include <otfccxx_private/fmem_file.hpp>
+#include <otfccxx_private/json_ext.hpp>
+#include <otfccxx_private/machinery_stderr_capt.hpp>
+#include <otfccxx_private/otfcc_enum.hpp>
+#include <otfccxx_private/otfcc_iVector.hpp>
 
 
 namespace otfccxx {

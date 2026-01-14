@@ -21,7 +21,7 @@
 #endif
 
 
-#include <otfccxx-lib_private/machinery_stderr_capt.hpp>
+#include <otfccxx_private/machinery_stderr_capt.hpp>
 
 
 namespace otfccxx {

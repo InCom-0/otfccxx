@@ -1,7 +1,7 @@
 #pragma once
 
-#include <otfccxx-lib/otfccxx-lib.hpp>
-#include <otfccxx-lib_private/machinery_uptr.hpp>
+#include <otfccxx/otfccxx.hpp>
+#include <otfccxx_private/machinery_uptr.hpp>
 
 
 namespace otfccxx {
