@@ -28,7 +28,7 @@ CPMAddPackage(
   FIND_PACKAGE_ARGUMENTS NAME WOFF2
 )
 CPMAddPackage(
-  URI "gh:tobiaslocker/base64#master"
+  URI "gh:InCom-0/base64#master"
   OPTIONS "BASE64_ENABLE_TESTING OFF"
   NAME base64tl
 )
