@@ -135,19 +135,19 @@ public:
 
 private:
     void
-    add_ff_toSubset(std::span<const char> &buf, unsigned int const faceIndex) {
+    add_ff_toSubset(ByteSpan buf, unsigned int const faceIndex) {
         if (auto toInsert = make_ff(buf, faceIndex); toInsert.has_value()) {
             ffs_toSubset.push_back(std::move(toInsert.value()));
         }
     }
     void
-    add_ff_categoryBackup(std::span<const char> &buf, unsigned int const faceIndex) {
+    add_ff_categoryBackup(ByteSpan buf, unsigned int const faceIndex) {
         if (auto toInsert = make_ff(buf, faceIndex); toInsert.has_value()) {
             ffs_categoryBackup.push_back(std::move(toInsert.value()));
         }
     }
     void
-    add_ff_lastResort(std::span<const char> &buf, unsigned int const faceIndex) {
+    add_ff_lastResort(ByteSpan buf, unsigned int const faceIndex) {
         if (auto toInsert = make_ff(buf, faceIndex); toInsert.has_value()) {
             ffs_lastResort.push_back(std::move(toInsert.value()));
         }
@@ -157,13 +157,16 @@ private:
     add_ff_toSubset(std::filesystem::path const &pth, unsigned int const faceIndex) {
         if (auto exp_access = check_access(pth); exp_access.has_value()) {
             if (exp_access->readable) {
-                std::ifstream file(pth, std::ios::binary);
+                std::basic_ifstream<char> file(pth, std::ios::binary);
                 if (! file) { goto RET; }
 
                 std::vector<char> const data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
                 if (data.empty()) { goto RET; }
 
-                if (auto toInsert = make_ff(data, faceIndex); toInsert.has_value()) {
+                if (auto toInsert = make_ff(
+                        std::span<const std::byte>(reinterpret_cast<const std::byte *>(data.data()), data.size()),
+                        faceIndex);
+                    toInsert.has_value()) {
                     ffs_toSubset.push_back(std::move(toInsert.value()));
                 }
             }
@@ -175,13 +178,16 @@ private:
     add_ff_categoryBackup(std::filesystem::path const &pth, unsigned int const faceIndex) {
         if (auto exp_access = check_access(pth); exp_access.has_value()) {
             if (exp_access->readable) {
-                std::ifstream file(pth, std::ios::binary);
+                std::basic_ifstream<char> file(pth, std::ios::binary);
                 if (! file) { goto RET; }
 
                 std::vector<char> const data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
                 if (data.empty()) { goto RET; }
 
-                if (auto toInsert = make_ff(data, faceIndex); toInsert.has_value()) {
+                if (auto toInsert = make_ff(
+                        std::span<const std::byte>(reinterpret_cast<const std::byte *>(data.data()), data.size()),
+                        faceIndex);
+                    toInsert.has_value()) {
                     ffs_categoryBackup.push_back(std::move(toInsert.value()));
                 }
             }
@@ -193,13 +199,16 @@ private:
     add_ff_lastResort(std::filesystem::path const &pth, unsigned int const faceIndex) {
         if (auto exp_access = check_access(pth); exp_access.has_value()) {
             if (exp_access->readable) {
-                std::ifstream file(pth, std::ios::binary);
+                std::basic_ifstream<char> file(pth, std::ios::binary);
                 if (! file) { goto RET; }
 
                 std::vector<char> const data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
                 if (data.empty()) { goto RET; }
 
-                if (auto toInsert = make_ff(data, faceIndex); toInsert.has_value()) {
+                if (auto toInsert = make_ff(
+                        std::span<const std::byte>(reinterpret_cast<const std::byte *>(data.data()), data.size()),
+                        faceIndex);
+                    toInsert.has_value()) {
                     ffs_lastResort.push_back(std::move(toInsert.value()));
                 }
             }
@@ -209,9 +218,9 @@ private:
     }
 
     std::expected<hb_face_uptr, err_subset>
-    make_ff(std::span<const char> const &buf, unsigned int const faceIndex) {
-        hb_blob_uptr blob(
-            hb_blob_create_or_fail(buf.data(), buf.size_bytes(), HB_MEMORY_MODE_DUPLICATE, nullptr, nullptr));
+    make_ff(ByteSpan buf, unsigned int const faceIndex) {
+        hb_blob_uptr blob(hb_blob_create_or_fail(reinterpret_cast<const char *>(buf.data()), buf.size_bytes(),
+                                                 HB_MEMORY_MODE_DUPLICATE, nullptr, nullptr));
         if (! blob) { return std::unexpected(err_subset::hb_blob_t_createFailure); }
 
         // Create face from blob
@@ -289,17 +298,17 @@ Subsetter::operator=(Subsetter &&) noexcept = default;
 
 // Adding FontFaces
 Subsetter &
-Subsetter::add_ff_toSubset(std::span<const char> buf, unsigned int const faceIndex) {
+Subsetter::add_ff_toSubset(ByteSpan buf, unsigned int const faceIndex) {
     pimpl->add_ff_toSubset(buf, faceIndex);
     return *this;
 }
 Subsetter &
-Subsetter::add_ff_categoryBackup(std::span<const char> buf, unsigned int const faceIndex) {
+Subsetter::add_ff_categoryBackup(ByteSpan buf, unsigned int const faceIndex) {
     pimpl->add_ff_categoryBackup(buf, faceIndex);
     return *this;
 }
 Subsetter &
-Subsetter::add_ff_lastResort(std::span<const char> buf, unsigned int const faceIndex) {
+Subsetter::add_ff_lastResort(ByteSpan buf, unsigned int const faceIndex) {
     pimpl->add_ff_lastResort(buf, faceIndex);
     return *this;
 }

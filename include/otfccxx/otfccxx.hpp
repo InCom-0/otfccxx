@@ -135,11 +135,11 @@ public:
     operator=(const Subsetter &) = delete;
 
     Subsetter &
-    add_ff_toSubset(std::span<const char> buf, unsigned int const faceIndex = 0u);
+    add_ff_toSubset(ByteSpan buf, unsigned int const faceIndex = 0u);
     Subsetter &
-    add_ff_categoryBackup(std::span<const char> buf, unsigned int const faceIndex = 0u);
+    add_ff_categoryBackup(ByteSpan buf, unsigned int const faceIndex = 0u);
     Subsetter &
-    add_ff_lastResort(std::span<const char> buf, unsigned int const faceIndex = 0u);
+    add_ff_lastResort(ByteSpan buf, unsigned int const faceIndex = 0u);
 
     Subsetter &
     add_ff_toSubset(std::filesystem::path const &pth, unsigned int const faceIndex = 0u);
