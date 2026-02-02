@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <expected>
 #include <fstream>
+#include <optional>
 #include <ranges>
 #include <unordered_map>
 #include <unordered_set>
@@ -91,6 +92,58 @@ write_bytesToFile(std::filesystem::path const &p, ByteSpan bytes) {
     outs.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size_bytes()));
     outs.flush();
     return outs.good();
+}
+
+// Checks the 'header' of the byte blog for font type TAGs only. Verifies nothing.
+std::optional<FontType>
+isMaybe_legitFont(std::span<const std::byte> fontFile) {
+    auto otfcc_get32u = [&](size_t offset) -> std::optional<uint32_t> {
+        auto otfcc_endian_convert32 = [](uint32_t i) -> uint32_t {
+            auto const otfcc_check_endian = [](void) -> bool {
+                union {
+                    uint8_t  i1[2];
+                    uint16_t i2;
+                } check_union = {.i2 = 1}; // if you don't have a new VC, upgrade it
+
+                return (check_union.i1[0] == 1);
+            };
+
+            if (otfcc_check_endian()) {
+                union {
+                    uint8_t  i1[4];
+                    uint32_t i4;
+                } src, des;
+
+                src.i4 = i;
+
+                des.i1[0] = src.i1[3];
+                des.i1[1] = src.i1[2];
+                des.i1[2] = src.i1[1];
+                des.i1[3] = src.i1[0];
+
+                return des.i4;
+            }
+            else { return i; }
+        };
+        if (fontFile.size() < (offset + 4)) { return std::nullopt; }
+
+        uint32_t res;
+        std::memcpy(&res, fontFile.data() + offset, 4);
+        return otfcc_endian_convert32(res);
+    };
+
+    auto fontTypeRaw = otfcc_get32u(0);
+    if (not fontTypeRaw.has_value()) { return std::nullopt; }
+
+    switch (fontTypeRaw.value()) {
+        case 0x4f54544f: return FontType::CFF; break;  // OTTO
+        case 0x00010000:
+        case 0x74727565:                                   // true
+        case 0x74797031:     return FontType::TRUE; break; // typ1
+        case 0x74746366:     return FontType::TTFC; break; // ttfc
+        default:         return FontType::Unknown; break;
+    }
+    std::unreachable();
 }
 
 

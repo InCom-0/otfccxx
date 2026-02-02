@@ -2,7 +2,9 @@
 
 #include <expected>
 #include <filesystem>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -48,6 +50,13 @@ using ByteSpan = std::span<const std::byte>;
 // #####################################################################
 // ### Public enums ###
 // #####################################################################
+enum class FontType : size_t {
+    TRUE    = 0x00010000,
+    CFF     = 0x4F54544F,
+    TTFC    = 0x74746366,
+    Unknown = std::numeric_limits<size_t>::max()
+};
+
 enum class err : size_t {
     unknownError = 1,
     unexpectedNullptr,
@@ -91,8 +100,16 @@ enum class err_converter : size_t {
     woff2_decompressionFailed
 };
 
+
+// #####################################################################
+// ### Various free related functions ###
+// #####################################################################
+
 OTFCCXX_API std::expected<bool, std::filesystem::file_type>
             write_bytesToFile(std::filesystem::path const &p, ByteSpan bytes);
+
+OTFCCXX_API std::optional<FontType>
+            is_legitFont(std::span<const std::byte> fontFile);
 
 
 // #####################################################################
