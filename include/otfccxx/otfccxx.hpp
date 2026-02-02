@@ -108,8 +108,12 @@ enum class err_converter : size_t {
 OTFCCXX_API std::expected<bool, std::filesystem::file_type>
             write_bytesToFile(std::filesystem::path const &p, ByteSpan bytes);
 
+// Checks the 'header' of the byte blog for font type TAGs only. Verifies nothing.
 OTFCCXX_API std::optional<FontType>
-            is_legitFont(std::span<const std::byte> fontFile);
+            getMaybe_fontType(std::span<const std::byte> fontFile);
+
+OTFCCXX_API bool
+is_legitFont(std::span<const std::byte> fontFile);
 
 
 // #####################################################################

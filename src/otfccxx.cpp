@@ -94,9 +94,9 @@ write_bytesToFile(std::filesystem::path const &p, ByteSpan bytes) {
     return outs.good();
 }
 
-// Checks the 'header' of the byte blog for font type TAGs only. Verifies nothing.
+
 std::optional<FontType>
-isMaybe_legitFont(std::span<const std::byte> fontFile) {
+getMaybe_fontType(std::span<const std::byte> fontFile) {
     auto otfcc_get32u = [&](size_t offset) -> std::optional<uint32_t> {
         auto otfcc_endian_convert32 = [](uint32_t i) -> uint32_t {
             auto const otfcc_check_endian = [](void) -> bool {
@@ -138,12 +138,19 @@ isMaybe_legitFont(std::span<const std::byte> fontFile) {
     switch (fontTypeRaw.value()) {
         case 0x4f54544f: return FontType::CFF; break;  // OTTO
         case 0x00010000:
-        case 0x74727565:                                   // true
-        case 0x74797031:     return FontType::TRUE; break; // typ1
-        case 0x74746366:     return FontType::TTFC; break; // ttfc
+        case 0x74727565:                               // true
+        case 0x74797031: return FontType::TRUE; break; // typ1
+        case 0x74746366: return FontType::TTFC; break; // ttfc
         default:         return FontType::Unknown; break;
     }
     std::unreachable();
+}
+
+bool
+is_legitFont(std::span<const std::byte> fontFile) {
+
+    // TODO: Needs some validation logic here, probably by wrapping yet another dedicated library
+    return false;
 }
 
 
