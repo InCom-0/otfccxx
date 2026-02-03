@@ -51,7 +51,7 @@ using ByteSpan = std::span<const std::byte>;
 // ### Public enums ###
 // #####################################################################
 enum class FontType : size_t {
-    TRUE    = 0x00010000,
+    TRUT    = 0x00010000,
     CFF     = 0x4F54544F,
     TTFC    = 0x74746366,
     Unknown = std::numeric_limits<size_t>::max()

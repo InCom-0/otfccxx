@@ -139,7 +139,7 @@ getMaybe_fontType(std::span<const std::byte> fontFile) {
         case 0x4f54544f: return FontType::CFF; break;  // OTTO
         case 0x00010000:
         case 0x74727565:                               // true
-        case 0x74797031: return FontType::TRUE; break; // typ1
+        case 0x74797031: return FontType::TRUT; break; // typ1
         case 0x74746366: return FontType::TTFC; break; // ttfc
         default:         return FontType::Unknown; break;
     }
