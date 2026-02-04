@@ -91,7 +91,7 @@ endif()
 
 # When we build harfbuzz ourselves we need don't install it and therefore need to use different directory structure for includes
 target_compile_definitions(otfccxx
-  PRIVATE $<$<BOOL:${OTFCCXX_HARFBUZZ_BUILDFROMSOURCE}>:OTFCCXX_HARFBUZZ_BUILDFROMSOURCE>
+  PRIVATE $<$<BOOL:${harfbuzz_ADDED}>:OTFCCXX_HARFBUZZ_BUILDFROMSOURCE>
 )
 
 
