@@ -11,8 +11,8 @@ include(cmake/CPM.cmake)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
-if(WIN32 AND (CMAKE_BUILD_TYPE STREQUAL "Release"))
-    set(CPM_USE_LOCAL_PACKAGES OFF)
+# if(WIN32 AND (CMAKE_BUILD_TYPE STREQUAL "Release"))
+#     set(CPM_USE_LOCAL_PACKAGES OFF)
     CPMAddPackage(
         NAME harfbuzz
         URL https://github.com/harfbuzz/harfbuzz/releases/download/12.3.0/harfbuzz-12.3.0.tar.xz
@@ -20,9 +20,9 @@ if(WIN32 AND (CMAKE_BUILD_TYPE STREQUAL "Release"))
         EXCLUDE_FROM_ALL TRUE
         OPTIONS "BUILD_SHARED_LIBS ON" "HB_BUILD_UTILS OFF"
     )
-    unset(CPM_USE_LOCAL_PACKAGES)
-else()
-endif()
+    # unset(CPM_USE_LOCAL_PACKAGES)
+# else()
+# endif()
 
 CPMAddPackage(
     URI "gh:InCom-0/otfcc-lib_cmake#master"
