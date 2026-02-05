@@ -97,6 +97,13 @@ target_compile_definitions(otfccxx
   PRIVATE $<$<BOOL:${harfbuzz_ADDED}>:OTFCCXX_HARFBUZZ_BUILDFROMSOURCE>
 )
 
+set(hb_src_hh_FILE "${harfbuzz_SOURCE_DIR}/src/hb-algs.hh")
+set_source_files_properties(
+  "${hb_src_hh_FILE}"
+  PROPERTIES
+  COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-stringop-overread>"
+)
+
 
 #####################################################################
 ### Installing, packaging ###
