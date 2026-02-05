@@ -11,7 +11,7 @@ include(cmake/CPM.cmake)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
-# if(WIN32 AND (CMAKE_BUILD_TYPE STREQUAL "Release"))
+if(WIN32 AND (CMAKE_BUILD_TYPE STREQUAL "Release"))
 #     set(CPM_USE_LOCAL_PACKAGES OFF)
     CPMAddPackage(
         NAME harfbuzz
@@ -22,7 +22,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
     )
     # unset(CPM_USE_LOCAL_PACKAGES)
 # else()
-# endif()
+endif()
 
 CPMAddPackage(
     URI "gh:InCom-0/otfcc-lib_cmake#master"
