@@ -97,7 +97,7 @@ target_compile_definitions(otfccxx
   PRIVATE $<$<BOOL:${harfbuzz_ADDED}>:OTFCCXX_HARFBUZZ_BUILDFROMSOURCE>
 )
 
-set(hb_src_hh_FILE "${harfbuzz_SOURCE_DIR}/src/hb-algs.hh")
+set(hb_src_hh_FILE "${harfbuzz_SOURCE_DIR}/src/harfbuzz.cc")
 set_source_files_properties(
   "${hb_src_hh_FILE}"
   PROPERTIES
