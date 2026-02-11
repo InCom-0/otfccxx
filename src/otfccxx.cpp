@@ -479,15 +479,14 @@ RET:
         while (hb_set_next(pimpl->toKeep_unicodeCPs.get(), curCP.get())) { resVec.push_back(*curCP); }
     }
 
-    return std::make_pair(
-        std::vector<Bytes>(std::from_range, res | std::views::transform([](auto const &item) {
-                                                unsigned int length;
-                                                const char  *data = hb_blob_get_data(item.get(), &length);
-                                                return Bytes(
-                                                    std::from_range,
-                                                    std::span(reinterpret_cast<const std::byte *>(data), length));
-                                            })),
-        std::move(resVec));
+    // TODO: Once on GCC 15 (or supporting) use std::from_range based constructor
+    auto retView = res | std::views::transform([](auto const &item) {
+                       unsigned int length;
+                       const char  *data    = hb_blob_get_data(item.get(), &length);
+                       auto         retSpan = std::span(reinterpret_cast<const std::byte *>(data), length);
+                       return Bytes(retSpan.begin(), retSpan.end());
+                   });
+    return std::make_pair(std::vector<Bytes>(retView.begin(), retView.end()), std::move(resVec));
 }
 
 bool

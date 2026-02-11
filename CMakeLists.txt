@@ -57,7 +57,10 @@ target_sources(otfccxx
 target_link_libraries(otfccxx PRIVATE harfbuzz-subset harfbuzz woff2enc woff2dec otfcc_lib::otfcc_lib fmem::fmem base64)
 
 target_compile_features(otfccxx PRIVATE cxx_std_23)
-set_target_properties(otfccxx PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
+set_target_properties(otfccxx PROPERTIES
+  POSITION_INDEPENDENT_CODE TRUE
+  VERIFY_INTERFACE_HEADER_SETS ON
+)
 
 if(otfccxx_BUILD_SHARED_LIB)
   set_target_properties(otfccxx PROPERTIES
