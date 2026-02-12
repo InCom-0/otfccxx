@@ -26,6 +26,9 @@ CPMAddPackage(
     URI "gh:InCom-0/fmem#master"
     OPTIONS "FMEM_STATIC ON" "ALLOW_OPENMEMSTREAM OFF"
 )
+
+find_package(WOFF2)
+
 CPMAddPackage(
     URI "gh:InCom-0/woff2#otfccxx"
     OPTIONS "NOISY_LOGGING OFF" "BUILD_SHARED_LIBS OFF"
@@ -36,3 +39,34 @@ CPMAddPackage(
     OPTIONS "BASE64_ENABLE_TESTING OFF"
     NAME base64tl
 )
+
+
+message(STATUS "---- HarfBuzz / WOFF2 diagnostics ----")
+
+# HarfBuzz
+message(STATUS "HarfBuzz_DIR='${HarfBuzz_DIR}'")
+message(STATUS "HarfBuzz_FOUND='${HarfBuzz_FOUND}'")
+message(STATUS "HarfBuzz_INCLUDE_DIRS='${HarfBuzz_INCLUDE_DIRS}'")
+message(STATUS "HarfBuzz_LIBRARIES='${HarfBuzz_LIBRARIES}'")
+if(TARGET harfbuzz::harfbuzz)
+    message(STATUS "Target harfbuzz::harfbuzz = FOUND")
+elseif(TARGET HarfBuzz::HarfBuzz)
+    message(STATUS "Target HarfBuzz::HarfBuzz = FOUND")
+else()
+    message(STATUS "HarfBuzz target = NOT FOUND")
+endif()
+
+# WOFF2
+message(STATUS "WOFF2_DIR='${WOFF2_DIR}'")
+message(STATUS "WOFF2_FOUND='${WOFF2_FOUND}'")
+message(STATUS "WOFF2_INCLUDE_DIRS='${WOFF2_INCLUDE_DIRS}'")
+message(STATUS "WOFF2_LIBRARIES='${WOFF2_LIBRARIES}'")
+if(TARGET WOFF2::woff2)
+    message(STATUS "Target WOFF2::woff2 = FOUND")
+elseif(TARGET woff2::woff2)
+    message(STATUS "Target woff2::woff2 = FOUND")
+else()
+    message(STATUS "WOFF2 target = NOT FOUND")
+endif()
+
+message(STATUS "--------------------------------------")
