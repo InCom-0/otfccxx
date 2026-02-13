@@ -30,6 +30,7 @@ CPMAddPackage(
 CPMAddPackage(
     URI "gh:InCom-0/woff2#otfccxx"
     OPTIONS "NOISY_LOGGING OFF" "BUILD_SHARED_LIBS OFF"
+    FORCE TRUE
     NAME WOFF2
 )
 CPMAddPackage(
