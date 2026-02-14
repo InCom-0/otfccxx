@@ -54,7 +54,9 @@ target_sources(otfccxx
   BASE_DIRS
   src/private_inc)
 
-target_link_libraries(otfccxx PRIVATE harfbuzz-subset harfbuzz woff2enc woff2dec otfcc_lib::otfcc_lib fmem::fmem base64)
+target_link_libraries(otfccxx PRIVATE harfbuzz::subset harfbuzz::harfbuzz)
+target_link_libraries(otfccxx PRIVATE WOFF2::woff2enc WOFF2::woff2dec)
+target_link_libraries(otfccxx PRIVATE otfcc_lib::otfcc_lib fmem::fmem base64)
 
 target_compile_features(otfccxx PRIVATE cxx_std_23)
 set_target_properties(otfccxx PROPERTIES
