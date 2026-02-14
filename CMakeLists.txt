@@ -98,9 +98,13 @@ if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT MATCHES "MSVC")
 endif()
 
 # When we build harfbuzz ourselves we need don't install it and therefore need to use different directory structure for includes
-target_compile_definitions(otfccxx
-  PRIVATE $<$<BOOL:${harfbuzz_ADDED}>:OTFCCXX_HARFBUZZ_BUILDFROMSOURCE>
-)
+if(harfbuzz_ADDED OR APPLE)
+  target_compile_definitions(otfccxx
+    PRIVATE OTFCCXX_HARFBUZZ_BUILDFROMSOURCE
+  )
+endif()
+
+
 
 set(hb_src_hh_FILE "${harfbuzz_SOURCE_DIR}/src/harfbuzz.cc")
 set_source_files_properties(
