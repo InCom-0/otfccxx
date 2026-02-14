@@ -284,7 +284,7 @@ private:
         if (! blob) { return std::unexpected(err_subset::hb_blob_t_createFailure); }
 
         // Create face from blob
-        hb_face_uptr face(hb_face_create_or_fail(blob.get(), faceIndex));
+        hb_face_uptr face(hb_face_create (blob.get(), faceIndex));
         if (! face) { return std::unexpected(err_subset::hb_face_t_createFailure); }
 
         return face;
