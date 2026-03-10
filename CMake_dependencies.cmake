@@ -6,10 +6,9 @@ if(NOT DEFINED CPM_LOCAL_PACKAGES_ONLY)
         "CPM will not be forbidden from downloading packages. Will have to use local packages." FORCE)
 endif()
 
-include(cmake/CPM.cmake)
+include(cmake/lefticus/CPM.cmake)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/incom/modules")
 
-
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
 CPMAddPackage(
     NAME harfbuzz
