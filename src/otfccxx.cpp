@@ -4,6 +4,7 @@
 #include <fstream>
 #include <optional>
 #include <ranges>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -285,7 +286,7 @@ private:
         _blob_storage.push_back(std::move(blob));
 
         // Create face from blob
-        hb_face_uptr face(hb_face_create (_blob_storage.back().get(), faceIndex));
+        hb_face_uptr face(hb_face_create(_blob_storage.back().get(), faceIndex));
         if (! face) { return std::unexpected(err_subset::hb_face_t_createFailure); }
 
         return face;
@@ -425,50 +426,65 @@ Subsetter::add_toKeep_CPs(std::span<const hb_codepoint_t> const cps) {
 }
 
 // Execution
-std::expected<std::vector<Bytes>, err_subset>
+std::expected<std::tuple<std::vector<Bytes>, Subsetter::ExecuteResMapping_t>, err_subset>
 Subsetter::execute() {
     if (auto res = execute_bestEffort(); res.has_value()) {
-        if (res.value().second.empty()) { return std::move(res.value().first); }
+        if (std::get<2>(res.value()).empty()) {
+            return std::make_tuple(std::move(std::get<0>(res.value())), std::move(std::get<1>(res.value())));
+        }
         else { return std::unexpected(err_subset::execute_someRequestedGlyphsAreMissing); }
     }
     else { return std::unexpected(res.error()); }
 }
 
-std::expected<std::pair<std::vector<Bytes>, std::vector<uint32_t>>, err_subset>
+std::expected<std::tuple<std::vector<Bytes>, Subsetter::ExecuteResMapping_t, std::vector<uint32_t>>, err_subset>
 Subsetter::execute_bestEffort() {
-    std::vector<hb_blob_uptr> res;
+    std::vector<hb_blob_uptr>      res;
+    Subsetter::ExecuteResMapping_t mapping{
+        .ff_toSubset_positions = std::vector<std::optional<size_t>>(pimpl->ffs_toSubset.size(), std::nullopt),
+        .ff_categoryBackup_positions =
+            std::vector<std::optional<size_t>>(pimpl->ffs_categoryBackup.size(), std::nullopt),
+        .ff_lastResort_positions = std::vector<std::optional<size_t>>(pimpl->ffs_lastResort.size(), std::nullopt)};
 
-    for (auto &ff_to : pimpl->ffs_toSubset) {
+    for (size_t id = 0; auto &ff_to : pimpl->ffs_toSubset) {
         if (hb_set_is_empty(pimpl->toKeep_unicodeCPs.get())) { goto RET; }
 
         auto exp_ff = pimpl->make_subset(ff_to.get());
-        if (not exp_ff.has_value()) {
-            if (exp_ff.error() == err_subset::make_subset_noIntersectingGlyphs) { continue; }
-            else { return std::unexpected(exp_ff.error()); }
+        if (not exp_ff.has_value() && exp_ff.error() != err_subset::make_subset_noIntersectingGlyphs) {
+            return std::unexpected(exp_ff.error());
         }
-        else { res.push_back(hb_blob_uptr(hb_face_reference_blob(exp_ff.value().get()))); }
+        else {
+            mapping.ff_toSubset_positions.at(id) = res.size();
+            res.push_back(hb_blob_uptr(hb_face_reference_blob(exp_ff.value().get())));
+        }
+        ++id;
     }
 
-    for (auto &ff_to : pimpl->ffs_categoryBackup) {
+    for (size_t id = 0; auto &ff_to : pimpl->ffs_categoryBackup) {
         if (hb_set_is_empty(pimpl->toKeep_unicodeCPs.get())) { goto RET; }
 
         auto exp_ff = pimpl->should_include_category(ff_to.get());
-        if (not exp_ff.has_value()) {
-            if (exp_ff.error() == err_subset::make_subset_noIntersectingGlyphs) { continue; }
-            else { return std::unexpected(exp_ff.error()); }
+        if (not exp_ff.has_value() && exp_ff.error() != err_subset::make_subset_noIntersectingGlyphs) {
+            return std::unexpected(exp_ff.error());
         }
-        else { res.push_back(hb_blob_uptr(hb_face_reference_blob(ff_to.get()))); }
+        else {
+            mapping.ff_categoryBackup_positions.at(id) = res.size();
+            res.push_back(hb_blob_uptr(hb_face_reference_blob(ff_to.get())));
+        }
+        ++id;
     }
 
-    for (auto &ff_to : pimpl->ffs_lastResort) {
+    for (size_t id = 0; auto &ff_to : pimpl->ffs_lastResort) {
         if (hb_set_is_empty(pimpl->toKeep_unicodeCPs.get())) { goto RET; }
 
         auto exp_ff = pimpl->make_subset(ff_to.get());
-        if (not exp_ff.has_value()) {
-            if (exp_ff.error() == err_subset::make_subset_noIntersectingGlyphs) { continue; }
-            else { return std::unexpected(exp_ff.error()); }
+        if (not exp_ff.has_value() && exp_ff.error() != err_subset::make_subset_noIntersectingGlyphs) {
+            return std::unexpected(exp_ff.error());
         }
-        else { res.push_back(hb_blob_uptr(hb_face_reference_blob(exp_ff.value().get()))); }
+        else {
+            mapping.ff_lastResort_positions.at(id) = res.size();
+            res.push_back(hb_blob_uptr(hb_face_reference_blob(exp_ff.value().get())));
+        }
     }
 
 RET:
@@ -489,7 +505,7 @@ RET:
                        auto         retSpan = std::span(reinterpret_cast<const std::byte *>(data), length);
                        return Bytes(retSpan.begin(), retSpan.end());
                    });
-    return std::make_pair(std::vector<Bytes>(retView.begin(), retView.end()), std::move(resVec));
+    return std::make_tuple(std::vector<Bytes>(retView.begin(), retView.end()), std::move(mapping), std::move(resVec));
 }
 
 bool

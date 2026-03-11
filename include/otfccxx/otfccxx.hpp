@@ -182,9 +182,17 @@ public:
     // 1) execute() - Get 'waterfall of font faces'
     // 2) execute_bestEffort() - Get 'waterfall of font faces' + set(in a vector)
     // unicode points that weren't found in any font
-    std::expected<std::vector<Bytes>, err_subset>
+
+    // Mapping of original fonts included  in the execute result (nullopt means it wasn't)
+    struct ExecuteResMapping_t {
+        std::vector<std::optional<size_t>> ff_toSubset_positions;
+        std::vector<std::optional<size_t>> ff_categoryBackup_positions;
+        std::vector<std::optional<size_t>> ff_lastResort_positions;
+    };
+
+    std::expected<std::tuple<std::vector<Bytes>, ExecuteResMapping_t>, err_subset>
     execute();
-    std::expected<std::pair<std::vector<Bytes>, std::vector<uint32_t>>, err_subset>
+    std::expected<std::tuple<std::vector<Bytes>, ExecuteResMapping_t, std::vector<uint32_t>>, err_subset>
     execute_bestEffort();
 
     bool

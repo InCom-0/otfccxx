@@ -18,7 +18,7 @@ main(int argc, char *argv[]) {
 
     if (not vecOfResFonts.has_value()) { std::exit(1); }
 
-    for (auto &oneSubsFont : vecOfResFonts.value()) {
+    for (auto &oneSubsFont : std::get<0>(vecOfResFonts.value())) {
 
         // otfccxx::Modifier modi_1(std::filesystem::path("../../../../iosev_2.ttf"));
         otfccxx::Modifier modi_1(oneSubsFont);
@@ -31,7 +31,8 @@ main(int argc, char *argv[]) {
         oneSubsFont = std::move(res.value());
     }
 
-    auto wf2 = otfccxx::Converter::encode_Woff2(vecOfResFonts->front()).and_then(otfccxx::Converter::encode_base64);
+    auto wf2 = otfccxx::Converter::encode_Woff2(std::get<0>(vecOfResFonts.value()).front())
+                   .and_then(otfccxx::Converter::encode_base64);
 
     if (wf2) { std::print("{}\n", wf2.value()); }
 
@@ -39,7 +40,9 @@ main(int argc, char *argv[]) {
     std::filesystem::path outFile = "./iosev_2.ttf";
     std::ofstream         out2(outFile, std::ios::binary);
 
-    if (not otfccxx::write_bytesToFile(outFile, vecOfResFonts->front()).has_value()) { std::exit(1); }
+    if (not otfccxx::write_bytesToFile(outFile, std::get<0>(vecOfResFonts.value()).front()).has_value()) {
+        std::exit(1);
+    }
 
     std::cout << "Run finished\n";
     return 0;
