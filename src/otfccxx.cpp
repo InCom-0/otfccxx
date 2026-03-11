@@ -282,9 +282,10 @@ private:
         hb_blob_uptr blob(hb_blob_create_or_fail(reinterpret_cast<const char *>(buf.data()), buf.size_bytes(),
                                                  HB_MEMORY_MODE_DUPLICATE, nullptr, nullptr));
         if (! blob) { return std::unexpected(err_subset::hb_blob_t_createFailure); }
+        _blob_storage.push_back(std::move(blob));
 
         // Create face from blob
-        hb_face_uptr face(hb_face_create (blob.get(), faceIndex));
+        hb_face_uptr face(hb_face_create (_blob_storage.back().get(), faceIndex));
         if (! face) { return std::unexpected(err_subset::hb_face_t_createFailure); }
 
         return face;
@@ -346,6 +347,8 @@ private:
     std::vector<hb_face_uptr> ffs_toSubset;
     std::vector<hb_face_uptr> ffs_categoryBackup;
     std::vector<hb_face_uptr> ffs_lastResort;
+
+    std::vector<hb_blob_uptr> _blob_storage;
 
     std::optional<err_subset> inError = std::nullopt;
 };
