@@ -91,6 +91,10 @@ enum class err_modifier : size_t {
     ratioAdvWidthToEmSize_cannotBeNegative,
     ratioAdvWidthToEmSize_cannotBeOver2,
     newEmSize_outsideValidValueRange,
+    emRatioCalculation_doesNotSeemMonospaced,
+    emRatioCalculation_noGlyphs,
+    emRatioCalculation_mostCommonAdvWidthisZero,
+    emRatioCalculation_unknown,
     otfccHandle_notIndex,
 };
 enum class err_converter : size_t {
@@ -216,6 +220,9 @@ public:
     Modifier() = delete;
     ~Modifier();
 
+    // Font analysis/calculations
+    std::expected<double, err_modifier>
+    calculate_ratio_advw2em();
 
     // Changing dimensions of glyphs
     std::expected<bool, err_modifier>

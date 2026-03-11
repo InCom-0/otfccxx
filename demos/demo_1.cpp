@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <print>
 
 #include <otfccxx/otfccxx.hpp>
@@ -22,6 +23,8 @@ main(int argc, char *argv[]) {
 
         // otfccxx::Modifier modi_1(std::filesystem::path("../../../../iosev_2.ttf"));
         otfccxx::Modifier modi_1(oneSubsFont);
+
+        std::print("{}\n", modi_1.calculate_ratio_advw2em().value_or(std::numeric_limits<double>::min()));
         if (auto rrr = modi_1.remove_ttfHints(); not rrr) { std::exit(1); }
         if (auto rrr = modi_1.change_unitsPerEm(2048); not rrr) { std::exit(1); }
         if (auto rrr = modi_1.change_makeMonospaced_byEmRatio(0.6); not rrr) { std::exit(1); }

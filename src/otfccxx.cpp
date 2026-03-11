@@ -589,6 +589,35 @@ private:
         };
     };
 
+    // Font analysis/calculations
+    std::expected<double, err_modifier>
+    calculate_ratio_advw2em() {
+        if (not _font) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        if (not _font->head) { return std::unexpected(err_modifier::unexpectedNullptr); }
+        if (not _font->glyf) { return std::unexpected(err_modifier::unexpectedNullptr); }
+
+        auto emSize  = static_cast<int32_t>(_font->head->unitsPerEm);
+        auto glyfVec = wrappers::CV_wrapper<table_glyf, glyf_GlyphPtr>(*_font->glyf);
+
+        std::unordered_map<int32_t, size_t> mp;
+        auto                                maxCount = 0uz;
+        int32_t                             widthVal{};
+
+        // Find most common advance width
+        for (auto oneGlyf : glyfVec) {
+            auto widthCount = ++(mp[static_cast<int32_t>(oneGlyf->advanceWidth.kernel)]);
+            if (widthCount > maxCount) {
+                maxCount = widthCount;
+                widthVal = static_cast<int32_t>(oneGlyf->advanceWidth.kernel);
+            }
+        }
+        if (maxCount == 0) { return std::unexpected(err_modifier::emRatioCalculation_noGlyphs); }
+        if (widthVal == 0) { return std::unexpected(err_modifier::emRatioCalculation_mostCommonAdvWidthisZero); }
+        if (widthVal < 0) { return std::unexpected(err_modifier::emRatioCalculation_unknown); }
+
+        return ((static_cast<double>(widthVal)) / emSize);
+    }
+
 
     // Glyph metric modification
     static std::expected<bool, err_modifier>
@@ -884,6 +913,12 @@ Modifier::Modifier(std::filesystem::path const &pth, uint32_t ttcindex, Options 
     : pimpl(std::make_unique<Impl>(pth, opts, ttcindex)) {}
 
 Modifier::~Modifier() = default;
+
+// Font analysis/calculations
+std::expected<double, err_modifier>
+Modifier::calculate_ratio_advw2em() {
+    return pimpl->calculate_ratio_advw2em();
+}
 
 // Changing dimensions of glyphs
 std::expected<bool, err_modifier>
