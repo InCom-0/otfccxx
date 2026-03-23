@@ -17,7 +17,7 @@ endif()
 
 
 CPMAddPackage(
-    URI "gh:InCom-0/otfcc-lib_cmake#master"
+    URI "gh:InCom-0/otfcc_cmake#master"
     OPTIONS "BUILD_SHARED_LIBS OFF"
 )
 CPMAddPackage(

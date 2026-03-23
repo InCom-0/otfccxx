@@ -446,6 +446,9 @@ Subsetter::execute_bestEffort() {
             std::vector<std::optional<size_t>>(pimpl->ffs_categoryBackup.size(), std::nullopt),
         .ff_lastResort_positions = std::vector<std::optional<size_t>>(pimpl->ffs_lastResort.size(), std::nullopt)};
 
+    // TODO: I will need to create some smart logic the characters that can appear in the
+    // plot area are always from one font only (so presumably from the fallback font most of the time)
+
     for (size_t id = 0; auto &ff_to : pimpl->ffs_toSubset) {
         if (hb_set_is_empty(pimpl->toKeep_unicodeCPs.get())) { goto RET; }
 
