@@ -1,12 +1,10 @@
-
 include(cmake/CPM_0.42.1.cmake)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/incom/modules")
 
-
 CPMAddPackage(
     NAME harfbuzz
-    URL https://github.com/harfbuzz/harfbuzz/releases/download/12.3.0/harfbuzz-12.3.0.tar.xz
-    URL_HASH SHA256=8660ebd3c27d9407fc8433b5d172bafba5f0317cb0bb4339f28e5370c93d42b7
+    URL https://github.com/harfbuzz/harfbuzz/releases/download/14.2.0/harfbuzz-14.2.0.tar.xz
+    URL_HASH SHA256=94017020f96d025bb66ae91574e4cf334bcad23e8175a8a40565b3721bc2eaff
     OPTIONS "BUILD_SHARED_LIBS ON" "HB_BUILD_UTILS OFF"
     EXCLUDE_FROM_ALL TRUE
 )
