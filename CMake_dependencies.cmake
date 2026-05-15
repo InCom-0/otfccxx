@@ -5,7 +5,7 @@ CPMAddPackage(
     NAME harfbuzz
     URL https://github.com/harfbuzz/harfbuzz/releases/download/14.2.0/harfbuzz-14.2.0.tar.xz
     URL_HASH SHA256=94017020f96d025bb66ae91574e4cf334bcad23e8175a8a40565b3721bc2eaff
-    OPTIONS "BUILD_SHARED_LIBS ON" "HB_BUILD_UTILS OFF"
+    OPTIONS "BUILD_SHARED_LIBS ON" "HB_BUILD_UTILS OFF" "HB_BUILD_VECTOR OFF"
     EXCLUDE_FROM_ALL TRUE
 )
 if(harfbuzz_ADDED)
