@@ -1,13 +1,20 @@
 include(cmake/CPM_0.42.3.cmake)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/incom/modules")
 
-CPMAddPackage(
-    NAME harfbuzz
-    URL https://github.com/harfbuzz/harfbuzz/releases/download/14.2.1/harfbuzz-14.2.1.tar.xz
-    URL_HASH SHA256=a54a5d8e9380a41fbb762ce367bcbf7704792dfca0d93f1bbca86c5a57902e0e
-    OPTIONS "BUILD_SHARED_LIBS ON" "HB_BUILD_UTILS OFF" "HB_BUILD_VECTOR OFF"
-    EXCLUDE_FROM_ALL TRUE
-)
+ # Temporary hack because find_package cannot handle versions on Arch
+ # Remove this once the issue is fixed in Arch (or perhaps CMake itself or harfbuzz ... who knows) 
+find_package(harfbuzz)
+
+if(NOT harfbuzz_FOUND)
+    CPMAddPackage(
+        NAME harfbuzz
+        URL https://github.com/harfbuzz/harfbuzz/releases/download/14.2.1/harfbuzz-14.2.1.tar.xz
+        URL_HASH SHA256=a54a5d8e9380a41fbb762ce367bcbf7704792dfca0d93f1bbca86c5a57902e0e
+        OPTIONS "BUILD_SHARED_LIBS ON" "HB_BUILD_UTILS OFF" "HB_BUILD_VECTOR OFF"
+        EXCLUDE_FROM_ALL TRUE
+    )
+endif()
+
 if(harfbuzz_ADDED)
     add_library(harfbuzz::harfbuzz ALIAS harfbuzz)
     add_library(harfbuzz::subset ALIAS harfbuzz-subset)
